@@ -1,0 +1,6 @@
+{
+  "name": "LinguaCraft English Academy",
+  "description": "Bilingual Arabic/English platform for English language teachers and students featuring grade-level electronic lesson preps, free & interactive paid exams, illustrated stories, official school papers, AI appreciation certificates, teacher prep Facebook sharing, and an admin control center.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

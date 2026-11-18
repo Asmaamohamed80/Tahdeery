@@ -1,0 +1,257 @@
+{
+  "entities": {
+    "AcademySettings": {
+      "title": "AcademySettings",
+      "description": "Publicly readable payment, contact, and pricing configuration managed by the admin.",
+      "type": "object",
+      "properties": {
+        "academyNameEn": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "academyNameAr": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "instapayHandle": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "instapayUrl": { "type": "string", "maxLength": 300 },
+        "whatsappNumber": { "type": "string", "minLength": 6, "maxLength": 25 },
+        "whiteLabelPriceEgp": { "type": "number" },
+        "aiCertificatePriceEgp": { "type": "number" },
+        "seeded": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "academyNameEn",
+        "academyNameAr",
+        "instapayHandle",
+        "whatsappNumber",
+        "whiteLabelPriceEgp",
+        "aiCertificatePriceEgp",
+        "seeded",
+        "updatedAt"
+      ]
+    },
+    "GradeResource": {
+      "title": "GradeResource",
+      "description": "Grade-level English lesson prep, exam, or interactive/free activity.",
+      "type": "object",
+      "properties": {
+        "gradeId": { "type": "string", "minLength": 2, "maxLength": 32 },
+        "category": { "type": "string", "enum": ["prep", "exam", "activity"] },
+        "titleEn": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "titleAr": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "descriptionEn": { "type": "string", "maxLength": 1200 },
+        "descriptionAr": { "type": "string", "maxLength": 1200 },
+        "isInteractive": { "type": "boolean" },
+        "isPaid": { "type": "boolean" },
+        "priceEgp": { "type": "number" },
+        "allowWhiteLabel": { "type": "boolean" },
+        "contentText": { "type": "string", "maxLength": 25000 },
+        "fileName": { "type": "string", "maxLength": 180 },
+        "fileDataUrl": { "type": "string", "maxLength": 600000 },
+        "authorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "gradeId",
+        "category",
+        "titleEn",
+        "titleAr",
+        "descriptionEn",
+        "descriptionAr",
+        "isInteractive",
+        "isPaid",
+        "priceEgp",
+        "allowWhiteLabel",
+        "contentText",
+        "authorUid",
+        "createdAt"
+      ]
+    },
+    "StoryItem": {
+      "title": "StoryItem",
+      "description": "Paid or featured English educational storybook uploaded by admin.",
+      "type": "object",
+      "properties": {
+        "titleEn": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "titleAr": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "levelLabel": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "summaryEn": { "type": "string", "maxLength": 1000 },
+        "summaryAr": { "type": "string", "maxLength": 1000 },
+        "previewExcerpt": { "type": "string", "maxLength": 2000 },
+        "coverUrl": { "type": "string", "maxLength": 500 },
+        "isPaid": { "type": "boolean" },
+        "priceEgp": { "type": "number" },
+        "fileName": { "type": "string", "maxLength": 180 },
+        "fileDataUrl": { "type": "string", "maxLength": 600000 },
+        "authorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "titleEn",
+        "titleAr",
+        "levelLabel",
+        "summaryEn",
+        "summaryAr",
+        "previewExcerpt",
+        "coverUrl",
+        "isPaid",
+        "priceEgp",
+        "authorUid",
+        "createdAt"
+      ]
+    },
+    "OfficialPaper": {
+      "title": "OfficialPaper",
+      "description": "Official school forms, records, and templates.",
+      "type": "object",
+      "properties": {
+        "titleEn": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "titleAr": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "categoryEn": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "categoryAr": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "descriptionEn": { "type": "string", "maxLength": 1000 },
+        "descriptionAr": { "type": "string", "maxLength": 1000 },
+        "contentText": { "type": "string", "maxLength": 20000 },
+        "fileName": { "type": "string", "maxLength": 180 },
+        "fileDataUrl": { "type": "string", "maxLength": 600000 },
+        "isPaid": { "type": "boolean" },
+        "priceEgp": { "type": "number" },
+        "authorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "titleEn",
+        "titleAr",
+        "categoryEn",
+        "categoryAr",
+        "descriptionEn",
+        "descriptionAr",
+        "contentText",
+        "isPaid",
+        "priceEgp",
+        "authorUid",
+        "createdAt"
+      ]
+    },
+    "NewsItem": {
+      "title": "NewsItem",
+      "description": "Simple announcement and news item published by admin.",
+      "type": "object",
+      "properties": {
+        "titleEn": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "titleAr": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "bodyEn": { "type": "string", "maxLength": 2500 },
+        "bodyAr": { "type": "string", "maxLength": 2500 },
+        "tagEn": { "type": "string", "maxLength": 60 },
+        "tagAr": { "type": "string", "maxLength": 60 },
+        "authorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "titleEn",
+        "titleAr",
+        "bodyEn",
+        "bodyAr",
+        "tagEn",
+        "tagAr",
+        "authorUid",
+        "createdAt"
+      ]
+    },
+    "TeacherPrep": {
+      "title": "TeacherPrep",
+      "description": "Teacher-authored English lesson preparation with shareable Facebook link.",
+      "type": "object",
+      "properties": {
+        "teacherName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "schoolOrCenter": { "type": "string", "maxLength": 120 },
+        "gradeLabel": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "unitTitle": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "lessonTitle": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "objectives": { "type": "string", "maxLength": 2500 },
+        "warmUp": { "type": "string", "maxLength": 1500 },
+        "vocabulary": { "type": "string", "maxLength": 1500 },
+        "procedures": { "type": "string", "maxLength": 5000 },
+        "assessment": { "type": "string", "maxLength": 2000 },
+        "homework": { "type": "string", "maxLength": 1500 },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "teacherName",
+        "gradeLabel",
+        "unitTitle",
+        "lessonTitle",
+        "objectives",
+        "procedures",
+        "ownerUid",
+        "createdAt"
+      ]
+    },
+    "OrderRecord": {
+      "title": "OrderRecord",
+      "description": "InstaPay to WhatsApp order intent logged by a signed-in user.",
+      "type": "object",
+      "properties": {
+        "itemType": { "type": "string", "enum": ["activity", "exam", "story", "whitelabel", "certificate", "paper"] },
+        "itemTitle": { "type": "string", "minLength": 2, "maxLength": 180 },
+        "amountEgp": { "type": "number" },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "customBrandingName": { "type": "string", "maxLength": 120 },
+        "instapayRef": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["pending_whatsapp", "confirmed"] },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "itemType",
+        "itemTitle",
+        "amountEgp",
+        "customerName",
+        "status",
+        "ownerUid",
+        "createdAt"
+      ]
+    },
+    "AdminMember": {
+      "title": "AdminMember",
+      "description": "Explicit admin membership record.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AcademySettings" },
+      "description": "Academy global payment & pricing settings."
+    },
+    "/grades_resources/{resourceId}": {
+      "schema": { "$ref": "#/entities/GradeResource" },
+      "description": "Lesson preps, exams, and activities organized by grade."
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/StoryItem" },
+      "description": "English educational stories managed by admin."
+    },
+    "/official_papers/{paperId}": {
+      "schema": { "$ref": "#/entities/OfficialPaper" },
+      "description": "Official school paperwork and templates."
+    },
+    "/news/{newsId}": {
+      "schema": { "$ref": "#/entities/NewsItem" },
+      "description": "News and updates posted by admin."
+    },
+    "/teacher_preps/{prepId}": {
+      "schema": { "$ref": "#/entities/TeacherPrep" },
+      "description": "Teacher-created lesson preps shared via public link."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/OrderRecord" },
+      "description": "InstaPay/WhatsApp order records."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminMember" },
+      "description": "Admin role documents."
+    }
+  }
+}
