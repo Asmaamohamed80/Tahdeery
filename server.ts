@@ -106,9 +106,11 @@ function collectProjectFiles(rootDir: string, currentDir = rootDir): Array<{ nam
 
     const fullPath = path.join(currentDir, item.name);
     const relPath = path.relative(rootDir, fullPath);
+    const normalizedRel = relPath.replace(/\\/g, '/');
 
     if (item.isDirectory()) {
       if (excludedDirs.has(item.name)) continue;
+      if (normalizedRel === 'public/assets/aistudio') continue;
       results.push(...collectProjectFiles(rootDir, fullPath));
     } else if (item.isFile()) {
       results.push({ name: relPath, data: fs.readFileSync(fullPath) });
@@ -134,7 +136,7 @@ function getAiClient(): GoogleGenAI | null {
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '6mb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
@@ -308,6 +310,122 @@ Keep each section practical, concise, and written in clear pedagogical English.`
       console.error('AI lesson prep error:', error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to draft lesson prep.',
+      });
+    }
+  });
+
+  app.post('/api/ai/extract-questions', async (req, res) => {
+    try {
+      const { pdfBase64, mimeType, rawText, gradeLabel, defaultUnit, maxQuestions } = req.body ?? {};
+      const cleanRawText = typeof rawText === 'string' ? rawText : '';
+      const cleanPdfBase64 = typeof pdfBase64 === 'string' ? pdfBase64 : '';
+
+      if (!cleanPdfBase64 && !cleanRawText.trim()) {
+        return res.status(400).json({ error: 'Please attach a PDF file or paste question text.' });
+      }
+
+      const ai = getAiClient();
+      if (!ai) {
+        return res.status(503).json({
+          error: 'Gemini API key is not configured on the server.',
+        });
+      }
+
+      const limit = Math.min(40, Math.max(1, typeof maxQuestions === 'number' ? maxQuestions : 25));
+      const fallbackUnit = typeof defaultUnit === 'string' && defaultUnit.trim() ? defaultUnit.trim() : 'General';
+      const targetGrade = typeof gradeLabel === 'string' && gradeLabel.trim() ? gradeLabel.trim() : 'Primary 4';
+
+      const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [];
+      if (cleanPdfBase64) {
+        parts.push({
+          inlineData: {
+            data: cleanPdfBase64,
+            mimeType: typeof mimeType === 'string' && mimeType ? mimeType : 'application/pdf',
+          },
+        });
+      }
+
+      parts.push({
+        text: `You are an expert English curriculum specialist for Egyptian & Arab K-12 schools.
+Extract up to ${limit} multiple-choice questions from the provided ${cleanPdfBase64 ? 'PDF document' : 'text'} for grade "${targetGrade}" (default unit/topic: "${fallbackUnit}").
+
+Rules:
+1. Preserve the exact multiple-choice questions and options if they already exist in the document. If the source contains fill-in-the-blank, choose-the-correct-word, or grammar/vocabulary exercises without full options, convert them cleanly into 4-option MCQs.
+2. Each question must have between 2 and 4 clear options (never empty strings).
+3. Determine correctIndex (0-based integer) accurately using any answer key in the document or correct English grammar/meaning.
+4. Keep unitLabel concise (e.g. "${fallbackUnit}" or the unit/lesson header from the file, max 80 chars).
+5. Provide a short 1-sentence explanation for why the answer is correct.${cleanRawText.trim() ? `\n\nSource text:\n${cleanRawText.slice(0, 30000)}` : ''}`,
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: { parts },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              questions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    unitLabel: { type: Type.STRING },
+                    prompt: { type: Type.STRING },
+                    options: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                    },
+                    correctIndex: { type: Type.INTEGER },
+                    explanation: { type: Type.STRING },
+                  },
+                  required: ['unitLabel', 'prompt', 'options', 'correctIndex'],
+                },
+              },
+            },
+            required: ['questions'],
+          },
+        },
+      });
+
+      const parsed = JSON.parse((response.text ?? '{"questions":[]}').trim()) as {
+        questions?: Array<{
+          unitLabel?: string;
+          prompt?: string;
+          options?: string[];
+          correctIndex?: number;
+          explanation?: string;
+        }>;
+      };
+
+      const sanitized = (Array.isArray(parsed.questions) ? parsed.questions : [])
+        .map((q) => {
+          const cleanOptions = (Array.isArray(q.options) ? q.options : [])
+            .map((o) => String(o || '').trim().slice(0, 200))
+            .filter(Boolean)
+            .slice(0, 4);
+          const prompt = String(q.prompt || '').trim().slice(0, 600);
+          if (prompt.length < 3 || cleanOptions.length < 2) return null;
+          const rawIdx = typeof q.correctIndex === 'number' ? Math.round(q.correctIndex) : 0;
+          const correctIndex = Math.max(0, Math.min(cleanOptions.length - 1, rawIdx));
+          const unitLabel = String(q.unitLabel || fallbackUnit).trim().slice(0, 100);
+          const explanation = String(q.explanation || '').trim().slice(0, 500);
+          return {
+            unitLabel: unitLabel || fallbackUnit,
+            prompt,
+            options: cleanOptions,
+            correctIndex,
+            ...(explanation ? { explanation } : {}),
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .slice(0, 40);
+
+      return res.json({ questions: sanitized });
+    } catch (error) {
+      console.error('AI extract-questions error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to extract questions from PDF/text.',
       });
     }
   });

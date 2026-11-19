@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, LogOut, Plus, Trash2, Upload, X } from 'lucide-react';
+import { Download, LogOut, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import {
   addDoc,
   collection,
@@ -196,6 +196,20 @@ export function AdminDashboardModal({
   const [qbOpt3, setQbOpt3] = useState('');
   const [qbCorrectIdx, setQbCorrectIdx] = useState(0);
   const [qbExplanation, setQbExplanation] = useState('');
+
+  const [importPdfName, setImportPdfName] = useState('');
+  const [importPdfBase64, setImportPdfBase64] = useState('');
+  const [importRawText, setImportRawText] = useState('');
+  const [extractingBank, setExtractingBank] = useState(false);
+  const [extractedPreview, setExtractedPreview] = useState<
+    Array<{
+      unitLabel: string;
+      prompt: string;
+      options: string[];
+      correctIndex: number;
+      explanation?: string;
+    }>
+  >([]);
 
   const [subUidInput, setSubUidInput] = useState('');
   const [subNameInput, setSubNameInput] = useState('');
@@ -758,6 +772,130 @@ export function AdminDashboardModal({
       setFeedback(lang === 'ar' ? 'تمت إضافة السؤال إلى بنك الأسئلة!' : 'Question added to bank!');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'question_bank');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePdfBankFileChange = (file: File | undefined) => {
+    if (!file) return;
+    if (file.type && file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setFeedback(
+        lang === 'ar' ? 'يرجى اختيار ملف بصيغة PDF فقط.' : 'Please select a PDF file.'
+      );
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setFeedback(
+        lang === 'ar'
+          ? 'حجم ملف الـ PDF كبير (أكثر من 3 ميجا). يمكنكِ تقسيمه أو نسخ الأسئلة منه ولصقها في الخانة بالأسفل.'
+          : 'PDF is larger than 3MB. Split it into smaller parts or paste the text directly below.'
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      setImportPdfName(file.name);
+      setImportPdfBase64(base64);
+      setFeedback('');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleExtractQuestionsFromPdf = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importPdfBase64 && !importRawText.trim()) {
+      setFeedback(
+        lang === 'ar'
+          ? 'ارفع ملف PDF أولاً أو الصق نص الأسئلة للاستخراج.'
+          : 'Attach a PDF file or paste question text first.'
+      );
+      return;
+    }
+    setExtractingBank(true);
+    setFeedback('');
+    try {
+      const gradeMeta = GRADES.find((g) => g.id === qbGradeId);
+      const resp = await fetch('/api/ai/extract-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(importPdfBase64 ? { pdfBase64: importPdfBase64, mimeType: 'application/pdf' } : {}),
+          ...(importRawText.trim() ? { rawText: importRawText.trim() } : {}),
+          gradeLabel: gradeMeta ? gradeMeta.nameEn : qbGradeId,
+          defaultUnit: qbUnitLabel.trim() || 'General',
+          maxQuestions: 30,
+        }),
+      });
+      const data = (await resp.json().catch(() => ({}))) as {
+        questions?: Array<{
+          unitLabel: string;
+          prompt: string;
+          options: string[];
+          correctIndex: number;
+          explanation?: string;
+        }>;
+        error?: string;
+      };
+      if (!resp.ok) {
+        throw new Error(data.error || 'Extraction failed');
+      }
+      const list = Array.isArray(data.questions) ? data.questions : [];
+      if (list.length === 0) {
+        setFeedback(
+          lang === 'ar'
+            ? 'لم يتم العثور على أسئلة واضحة في الملف. جرّبي لصق النص مباشرة أو التأكد أن الملف نصي وليس صوراً غير واضحة.'
+            : 'No readable questions were detected. Try pasting the text directly.'
+        );
+      } else {
+        setExtractedPreview(list);
+        setFeedback(
+          lang === 'ar'
+            ? `تم استخراج ${list.length} سؤال بنجاح! راجعيها بالأسفل ثم اضغطي حفظ في البنك.`
+            : `Extracted ${list.length} questions! Review below and save to bank.`
+        );
+      }
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : 'PDF extraction failed');
+    } finally {
+      setExtractingBank(false);
+    }
+  };
+
+  const handleSaveExtractedBatch = async () => {
+    if (!user || extractedPreview.length === 0) return;
+    setBusy(true);
+    setFeedback('');
+    try {
+      const batch = writeBatch(db);
+      extractedPreview.forEach((item) => {
+        const ref = doc(collection(db, 'question_bank'));
+        batch.set(ref, {
+          gradeId: qbGradeId,
+          unitLabel: (item.unitLabel || qbUnitLabel || 'General').slice(0, 100),
+          prompt: item.prompt.slice(0, 600),
+          options: item.options.slice(0, 4).map((o) => o.slice(0, 200)),
+          correctIndex: Math.max(0, Math.min(item.options.length - 1, item.correctIndex)),
+          ...(item.explanation ? { explanation: item.explanation.slice(0, 500) } : {}),
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      const count = extractedPreview.length;
+      setExtractedPreview([]);
+      setImportPdfName('');
+      setImportPdfBase64('');
+      setImportRawText('');
+      setFeedback(
+        lang === 'ar'
+          ? `تم حفظ ${count} سؤال دفعة واحدة في بنك الأسئلة بنجاح!`
+          : `Saved ${count} questions to the question bank!`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'question_bank');
     } finally {
       setBusy(false);
     }
@@ -2058,6 +2196,163 @@ export function AdminDashboardModal({
 
             {tab === 'quizbank' && (
               <div className="space-y-6">
+                {/* Smart AI Bulk Importer from PDF or Pasted Text */}
+                <form
+                  onSubmit={handleExtractQuestionsFromPdf}
+                  className="bg-sky-50/70 border border-sky-200 rounded-xl p-5 space-y-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-sky-900" />
+                        <span>
+                          {lang === 'ar'
+                            ? 'استيراد أسئلة من ملف PDF دفعة واحدة بالذكاء الاصطناعي'
+                            : 'Bulk Import Questions from PDF with AI'}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-600">
+                        {lang === 'ar'
+                          ? 'ارفعي ملف الـ PDF (حتى 3 ميجا) أو الصقي نص الأسئلة، وسيستخرجها الذكاء الاصطناعي كاختيار من متعدد ويحفظها في البنك بضغطة واحدة.'
+                          : 'Upload a PDF (up to 3MB) or paste text to extract up to 30 MCQs straight into your Question Bank.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                    <select
+                      value={qbGradeId}
+                      onChange={(e) => setQbGradeId(e.target.value)}
+                      className="md:col-span-3 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    >
+                      {GRADES.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {lang === 'ar' ? g.nameAr : g.nameEn}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder={lang === 'ar' ? 'اسم الوحدة (مثلاً Unit 1)' : 'Default Unit / Topic'}
+                      value={qbUnitLabel}
+                      onChange={(e) => setQbUnitLabel(e.target.value)}
+                      className="md:col-span-3 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    />
+                    <label className="md:col-span-6 flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-sky-400 rounded-lg cursor-pointer hover:bg-sky-50">
+                      <Upload className="w-4 h-4 text-sky-900 shrink-0" />
+                      <span className="truncate font-medium text-sky-950">
+                        {importPdfName
+                          ? importPdfName
+                          : lang === 'ar'
+                          ? 'اضغطي لاختيار ملف الـ PDF من جهازك'
+                          : 'Choose PDF file from device'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="hidden"
+                        onChange={(e) => handlePdfBankFileChange(e.target.files?.[0])}
+                      />
+                    </label>
+                  </div>
+
+                  <textarea
+                    rows={2}
+                    dir="auto"
+                    placeholder={
+                      lang === 'ar'
+                        ? 'اختياري: لو الـ PDF حجمه أكبر من 3 ميجا، انسخي منه الأسئلة والصقيها هنا...'
+                        : 'Optional: paste copied question text here if PDF exceeds 3MB...'
+                    }
+                    value={importRawText}
+                    onChange={(e) => setImportRawText(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                  />
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={extractingBank || busy}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800 disabled:opacity-60"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>
+                        {extractingBank
+                          ? lang === 'ar'
+                            ? 'جاري قراءة الـ PDF واستخراج الأسئلة...'
+                            : 'Extracting questions...'
+                          : lang === 'ar'
+                          ? 'استخراج الأسئلة من الـ PDF الآن'
+                          : 'Extract Questions from PDF'}
+                      </span>
+                    </button>
+                    {importPdfName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportPdfName('');
+                          setImportPdfBase64('');
+                        }}
+                        className="text-xs text-slate-600 hover:text-rose-700"
+                      >
+                        {lang === 'ar' ? 'إزالة الملف' : 'Clear PDF'}
+                      </button>
+                    )}
+                  </div>
+
+                  {extractedPreview.length > 0 && (
+                    <div className="bg-white border border-sky-200 rounded-xl p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs font-bold text-slate-900">
+                          {lang === 'ar'
+                            ? `معاينة الأسئلة المستخرجة (${extractedPreview.length} سؤال)`
+                            : `Extracted Preview (${extractedPreview.length} questions)`}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void handleSaveExtractedBatch()}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-emerald-700 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-60"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>
+                            {lang === 'ar'
+                              ? `حفظ الكل في بنك الأسئلة (${extractedPreview.length})`
+                              : `Save All to Bank (${extractedPreview.length})`}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div className="divide-y divide-slate-200 border border-slate-200 rounded-lg max-h-60 overflow-y-auto">
+                        {extractedPreview.map((item, idx) => (
+                          <div key={idx} className="p-3 flex items-start justify-between gap-3 text-xs">
+                            <div className="space-y-1 min-w-0" dir="ltr">
+                              <p className="font-semibold text-sky-900">{item.unitLabel}</p>
+                              <p className="font-medium text-slate-900">
+                                {idx + 1}. {item.prompt}
+                              </p>
+                              <p className="text-slate-600">
+                                {item.options.map((opt, oIdx) =>
+                                  oIdx === item.correctIndex ? `✓ ${opt}` : opt
+                                ).join('  |  ')}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExtractedPreview((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </form>
+
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                   {/* Add Question to Bank */}
                   <form
