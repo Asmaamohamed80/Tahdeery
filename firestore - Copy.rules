@@ -1,0 +1,609 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'lailafarag210@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll([
+          'academyNameEn', 'academyNameAr', 'instapayHandle',
+          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp',
+          'seeded', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
+          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
+          'seeded', 'updatedAt'
+        ])
+        && data.academyNameEn is string && data.academyNameEn.size() >= 2 && data.academyNameEn.size() <= 100
+        && data.academyNameAr is string && data.academyNameAr.size() >= 2 && data.academyNameAr.size() <= 100
+        && (!data.keys().hasAny(['logoDataUrl']) || (data.logoDataUrl is string && data.logoDataUrl.size() <= 150000))
+        && data.instapayHandle is string && data.instapayHandle.size() >= 2 && data.instapayHandle.size() <= 120
+        && (!data.keys().hasAny(['instapayUrl']) || (data.instapayUrl is string && data.instapayUrl.size() <= 300))
+        && data.whatsappNumber is string && data.whatsappNumber.size() >= 6 && data.whatsappNumber.size() <= 25
+        && data.whiteLabelPriceEgp is number && data.whiteLabelPriceEgp >= 0 && data.whiteLabelPriceEgp <= 100000
+        && data.aiCertificatePriceEgp is number && data.aiCertificatePriceEgp >= 0 && data.aiCertificatePriceEgp <= 100000
+        && (!data.keys().hasAny(['quizTermPriceEgp']) || (data.quizTermPriceEgp is number && data.quizTermPriceEgp >= 0 && data.quizTermPriceEgp <= 100000))
+        && data.seeded is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGradeResource(data) {
+      return data.keys().hasAll([
+          'gradeId', 'category', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isInteractive',
+          'isPaid', 'priceEgp', 'allowWhiteLabel', 'contentText',
+          'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'gradeId', 'category', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isInteractive',
+          'isPaid', 'priceEgp', 'allowWhiteLabel', 'contentText',
+          'fileName', 'fileDataUrl', 'authorUid', 'createdAt'
+        ])
+        && data.gradeId is string && data.gradeId.size() >= 2 && data.gradeId.size() <= 32
+        && data.category in ['prep', 'exam', 'worksheet', 'activity']
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1200
+        && data.descriptionAr is string && data.descriptionAr.size() <= 1200
+        && data.isInteractive is bool
+        && data.isPaid is bool
+        && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
+        && data.allowWhiteLabel is bool
+        && data.contentText is string && data.contentText.size() <= 25000
+        && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidStory(data) {
+      return data.keys().hasAll([
+          'titleEn', 'titleAr', 'levelLabel', 'summaryEn', 'summaryAr',
+          'previewExcerpt', 'coverUrl', 'isPaid', 'priceEgp', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'titleEn', 'titleAr', 'levelLabel', 'summaryEn', 'summaryAr',
+          'previewExcerpt', 'coverUrl', 'isPaid', 'priceEgp', 'fileName',
+          'fileDataUrl', 'authorUid', 'createdAt'
+        ])
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.levelLabel is string && data.levelLabel.size() >= 2 && data.levelLabel.size() <= 60
+        && data.summaryEn is string && data.summaryEn.size() <= 1000
+        && data.summaryAr is string && data.summaryAr.size() <= 1000
+        && data.previewExcerpt is string && data.previewExcerpt.size() <= 2000
+        && data.coverUrl is string && data.coverUrl.size() <= 500
+        && data.isPaid is bool
+        && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
+        && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidOfficialPaper(data) {
+      return data.keys().hasAll([
+          'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
+          'descriptionEn', 'descriptionAr', 'contentText',
+          'isPaid', 'priceEgp', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
+          'descriptionEn', 'descriptionAr', 'contentText',
+          'fileName', 'fileDataUrl', 'isPaid', 'priceEgp',
+          'authorUid', 'createdAt'
+        ])
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.categoryEn is string && data.categoryEn.size() >= 2 && data.categoryEn.size() <= 80
+        && data.categoryAr is string && data.categoryAr.size() >= 2 && data.categoryAr.size() <= 80
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1000
+        && data.descriptionAr is string && data.descriptionAr.size() <= 1000
+        && data.contentText is string && data.contentText.size() <= 20000
+        && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && data.isPaid is bool
+        && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidNews(data) {
+      return data.keys().hasAll([
+          'titleEn', 'titleAr', 'bodyEn', 'bodyAr',
+          'tagEn', 'tagAr', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'titleEn', 'titleAr', 'bodyEn', 'bodyAr',
+          'tagEn', 'tagAr', 'authorUid', 'createdAt'
+        ])
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.bodyEn is string && data.bodyEn.size() <= 2500
+        && data.bodyAr is string && data.bodyAr.size() <= 2500
+        && data.tagEn is string && data.tagEn.size() <= 60
+        && data.tagAr is string && data.tagAr.size() <= 60
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTeacherPrep(data) {
+      return data.keys().hasAll([
+          'teacherName', 'gradeLabel', 'unitTitle', 'lessonTitle',
+          'objectives', 'procedures', 'ownerUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'teacherName', 'schoolOrCenter', 'gradeLabel', 'unitTitle', 'lessonTitle',
+          'objectives', 'warmUp', 'vocabulary', 'procedures', 'assessment', 'homework',
+          'ownerUid', 'createdAt'
+        ])
+        && data.teacherName is string && data.teacherName.size() >= 2 && data.teacherName.size() <= 100
+        && (!data.keys().hasAny(['schoolOrCenter']) || (data.schoolOrCenter is string && data.schoolOrCenter.size() <= 120))
+        && data.gradeLabel is string && data.gradeLabel.size() >= 2 && data.gradeLabel.size() <= 60
+        && data.unitTitle is string && data.unitTitle.size() >= 2 && data.unitTitle.size() <= 120
+        && data.lessonTitle is string && data.lessonTitle.size() >= 2 && data.lessonTitle.size() <= 160
+        && data.objectives is string && data.objectives.size() <= 2500
+        && (!data.keys().hasAny(['warmUp']) || (data.warmUp is string && data.warmUp.size() <= 1500))
+        && (!data.keys().hasAny(['vocabulary']) || (data.vocabulary is string && data.vocabulary.size() <= 1500))
+        && data.procedures is string && data.procedures.size() <= 5000
+        && (!data.keys().hasAny(['assessment']) || (data.assessment is string && data.assessment.size() <= 2000))
+        && (!data.keys().hasAny(['homework']) || (data.homework is string && data.homework.size() <= 1500))
+        && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'itemType', 'itemTitle', 'amountEgp', 'customerName', 'status', 'ownerUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'itemType', 'itemTitle', 'amountEgp', 'customerName',
+          'customBrandingName', 'instapayRef', 'status', 'ownerUid', 'createdAt'
+        ])
+        && data.itemType in ['activity', 'worksheet', 'worksheet_pack', 'exam', 'story', 'whitelabel', 'certificate', 'paper', 'quiz_term']
+        && data.itemTitle is string && data.itemTitle.size() >= 2 && data.itemTitle.size() <= 180
+        && data.amountEgp is number && data.amountEgp >= 0 && data.amountEgp <= 100000
+        && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
+        && (!data.keys().hasAny(['customBrandingName']) || (data.customBrandingName is string && data.customBrandingName.size() <= 120))
+        && (!data.keys().hasAny(['instapayRef']) || (data.instapayRef is string && data.instapayRef.size() <= 120))
+        && data.status in ['pending_whatsapp', 'confirmed']
+        && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAdminMember(data) {
+      return data.keys().hasAll(['email', 'createdAt'])
+        && data.keys().hasOnly(['email', 'createdAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWorksheetPack(data) {
+      return data.keys().hasAll([
+          'packNumber', 'levelId', 'track', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isPaid', 'priceEgp',
+          'allowWhiteLabel', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'packNumber', 'levelId', 'track', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isPaid', 'priceEgp',
+          'allowWhiteLabel', 'authorUid', 'createdAt'
+        ])
+        && data.packNumber is number && data.packNumber >= 1 && data.packNumber <= 9999
+        && data.levelId in ['age_3_5', 'age_5_7', 'primary', 'prep_sec']
+        && data.track in ['arabic_letters', 'english_letters', 'numbers', 'writing_skills', 'general']
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1200
+        && data.descriptionAr is string && data.descriptionAr.size() <= 1200
+        && data.isPaid is bool
+        && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
+        && data.allowWhiteLabel is bool
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWorksheetPackItem(data) {
+      return data.keys().hasAll([
+          'packId', 'itemOrder', 'titleEn', 'titleAr',
+          'kind', 'isFreeSample', 'contentText', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'packId', 'itemOrder', 'titleEn', 'titleAr',
+          'kind', 'isFreeSample', 'contentText', 'fileName', 'fileDataUrl',
+          'authorUid', 'createdAt'
+        ])
+        && isValidId(data.packId)
+        && data.itemOrder is number && data.itemOrder >= 1 && data.itemOrder <= 9999
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.kind in ['worksheet', 'activity']
+        && data.isFreeSample is bool
+        && data.contentText is string && data.contentText.size() <= 25000
+        && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAffiliateCourse(data) {
+      return data.keys().hasAll([
+          'titleEn', 'titleAr', 'provider', 'track',
+          'descriptionEn', 'descriptionAr', 'durationLabel',
+          'affiliateUrl', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'titleEn', 'titleAr', 'provider', 'track',
+          'descriptionEn', 'descriptionAr', 'durationLabel',
+          'affiliateUrl', 'authorUid', 'createdAt'
+        ])
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.provider is string && data.provider.size() >= 2 && data.provider.size() <= 80
+        && data.track in ['phonics', 'methodology', 'ai_teaching', 'career']
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1000
+        && data.descriptionAr is string && data.descriptionAr.size() <= 1000
+        && data.durationLabel is string && data.durationLabel.size() <= 80
+        && data.affiliateUrl is string && data.affiliateUrl.size() >= 8 && data.affiliateUrl.size() <= 500
+        && data.affiliateUrl.matches('^https://.*')
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidQuestionBankItem(data) {
+      return data.keys().hasAll([
+          'gradeId', 'unitLabel', 'prompt', 'options', 'correctIndex', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'gradeId', 'unitLabel', 'prompt', 'options', 'correctIndex', 'explanation', 'authorUid', 'createdAt'
+        ])
+        && data.gradeId is string && data.gradeId.size() >= 2 && data.gradeId.size() <= 32
+        && data.unitLabel is string && data.unitLabel.size() >= 2 && data.unitLabel.size() <= 100
+        && data.prompt is string && data.prompt.size() >= 3 && data.prompt.size() <= 600
+        && data.options is list && data.options.size() >= 2 && data.options.size() <= 4
+        && data.options[0] is string && data.options[1] is string
+        && data.correctIndex is number && data.correctIndex >= 0 && data.correctIndex < data.options.size()
+        && (!data.keys().hasAny(['explanation']) || (data.explanation is string && data.explanation.size() <= 500))
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTeacherQuiz(data) {
+      return data.keys().hasAll([
+          'title', 'gradeLabel', 'teacherName', 'isTrial', 'isPublished',
+          'timeLimitMinutes', 'questions', 'ownerUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'title', 'gradeLabel', 'teacherName', 'schoolOrCenter', 'isTrial', 'isPublished',
+          'timeLimitMinutes', 'questions', 'ownerUid', 'createdAt'
+        ])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.gradeLabel is string && data.gradeLabel.size() >= 2 && data.gradeLabel.size() <= 80
+        && data.teacherName is string && data.teacherName.size() >= 2 && data.teacherName.size() <= 100
+        && (!data.keys().hasAny(['schoolOrCenter']) || (data.schoolOrCenter is string && data.schoolOrCenter.size() <= 120))
+        && data.isTrial is bool
+        && data.isPublished is bool
+        && data.timeLimitMinutes is number && data.timeLimitMinutes >= 0 && data.timeLimitMinutes <= 180
+        && data.questions is list && data.questions.size() >= 1 && data.questions.size() <= 40
+        && data.questions[0] is map
+        && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidQuizAttempt(data) {
+      return data.keys().hasAll([
+          'quizId', 'quizOwnerUid', 'studentName', 'score',
+          'totalQuestions', 'percentage', 'answers', 'submittedAt'
+        ])
+        && data.keys().hasOnly([
+          'quizId', 'quizOwnerUid', 'studentName', 'studentGroup', 'score',
+          'totalQuestions', 'percentage', 'answers', 'submittedAt'
+        ])
+        && isValidId(data.quizId)
+        && data.quizOwnerUid is string && data.quizOwnerUid.size() >= 1 && data.quizOwnerUid.size() <= 128
+        && data.studentName is string && data.studentName.size() >= 2 && data.studentName.size() <= 100
+        && (!data.keys().hasAny(['studentGroup']) || (data.studentGroup is string && data.studentGroup.size() <= 80))
+        && data.totalQuestions is number && data.totalQuestions >= 1 && data.totalQuestions <= 40
+        && data.score is number && data.score >= 0 && data.score <= data.totalQuestions
+        && data.percentage is number && data.percentage >= 0 && data.percentage <= 100
+        && data.answers is list && data.answers.size() >= 1 && data.answers.size() <= 40
+        && data.answers[0] is number
+        && data.submittedAt is timestamp;
+    }
+
+    function isValidTeacherSubscription(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'teacherName', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'teacherName', 'teacherEmail', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
+        ])
+        && isValidId(data.ownerUid)
+        && data.teacherName is string && data.teacherName.size() >= 2 && data.teacherName.size() <= 100
+        && (!data.keys().hasAny(['teacherEmail']) || (data.teacherEmail is string && data.teacherEmail.size() <= 160))
+        && data.termLabel is string && data.termLabel.size() >= 2 && data.termLabel.size() <= 80
+        && data.active is bool
+        && data.activatedByUid is string && data.activatedByUid.size() >= 1 && data.activatedByUid.size() <= 128
+        && data.activatedAt is timestamp;
+    }
+
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if false;
+      allow create: if isValidId(settingId) && isAdmin() && isValidSettings(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId) && isAdmin() && isValidSettings(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
+          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
+          'seeded', 'updatedAt'
+        ]);
+      allow delete: if isValidId(settingId) && isAdmin();
+    }
+
+    match /grades_resources/{resourceId} {
+      allow get: if isValidId(resourceId);
+      allow list: if true;
+      allow create: if isValidId(resourceId) && isAdmin() && isValidGradeResource(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(resourceId) && isAdmin() && isValidGradeResource(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'gradeId', 'category', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isInteractive',
+          'isPaid', 'priceEgp', 'allowWhiteLabel', 'contentText',
+          'fileName', 'fileDataUrl'
+        ]);
+      allow delete: if isValidId(resourceId) && isAdmin();
+    }
+
+    match /worksheet_packs/{packId} {
+      allow get: if isValidId(packId);
+      allow list: if true;
+      allow create: if isValidId(packId) && isAdmin() && isValidWorksheetPack(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(packId) && isAdmin() && isValidWorksheetPack(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'packNumber', 'levelId', 'track', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isPaid', 'priceEgp', 'allowWhiteLabel'
+        ]);
+      allow delete: if isValidId(packId) && isAdmin();
+    }
+
+    match /worksheet_items/{itemId} {
+      allow get: if isValidId(itemId);
+      allow list: if true;
+      allow create: if isValidId(itemId) && isAdmin() && isValidWorksheetPackItem(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (
+          exists(/databases/$(database)/documents/worksheet_packs/$(incoming().packId)) ||
+          existsAfter(/databases/$(database)/documents/worksheet_packs/$(incoming().packId))
+        );
+      allow update: if isValidId(itemId) && isAdmin() && isValidWorksheetPackItem(incoming())
+        && incoming().packId == existing().packId
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'itemOrder', 'titleEn', 'titleAr', 'kind', 'isFreeSample',
+          'contentText', 'fileName', 'fileDataUrl'
+        ]);
+      allow delete: if isValidId(itemId) && isAdmin();
+    }
+
+    match /stories/{storyId} {
+      allow get: if isValidId(storyId);
+      allow list: if true;
+      allow create: if isValidId(storyId) && isAdmin() && isValidStory(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(storyId) && isAdmin() && isValidStory(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'titleEn', 'titleAr', 'levelLabel', 'summaryEn', 'summaryAr',
+          'previewExcerpt', 'coverUrl', 'isPaid', 'priceEgp', 'fileName', 'fileDataUrl'
+        ]);
+      allow delete: if isValidId(storyId) && isAdmin();
+    }
+
+    match /official_papers/{paperId} {
+      allow get: if isValidId(paperId);
+      allow list: if true;
+      allow create: if isValidId(paperId) && isAdmin() && isValidOfficialPaper(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(paperId) && isAdmin() && isValidOfficialPaper(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
+          'descriptionEn', 'descriptionAr', 'contentText',
+          'fileName', 'fileDataUrl', 'isPaid', 'priceEgp'
+        ]);
+      allow delete: if isValidId(paperId) && isAdmin();
+    }
+
+    match /news/{newsId} {
+      allow get: if isValidId(newsId);
+      allow list: if true;
+      allow create: if isValidId(newsId) && isAdmin() && isValidNews(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(newsId) && isAdmin() && isValidNews(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'titleEn', 'titleAr', 'bodyEn', 'bodyAr', 'tagEn', 'tagAr'
+        ]);
+      allow delete: if isValidId(newsId) && isAdmin();
+    }
+
+    match /teacher_preps/{prepId} {
+      allow get: if isValidId(prepId);
+      allow list: if isVerifiedUser() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(prepId) && isVerifiedUser() && isValidTeacherPrep(incoming())
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(prepId) && isVerifiedUser() && isValidTeacherPrep(incoming())
+        && (existing().ownerUid == request.auth.uid || isAdmin())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'teacherName', 'schoolOrCenter', 'gradeLabel', 'unitTitle', 'lessonTitle',
+          'objectives', 'warmUp', 'vocabulary', 'procedures', 'assessment', 'homework'
+        ]);
+      allow delete: if isValidId(prepId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(orderId) && isVerifiedUser() && isValidOrder(incoming())
+        && incoming().ownerUid == request.auth.uid
+        && incoming().status == 'pending_whatsapp'
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(orderId) && isAdmin() && isValidOrder(incoming())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    match /affiliate_courses/{courseId} {
+      allow get: if isValidId(courseId);
+      allow list: if true;
+      allow create: if isValidId(courseId) && isAdmin() && isValidAffiliateCourse(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(courseId) && isAdmin() && isValidAffiliateCourse(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'titleEn', 'titleAr', 'provider', 'track',
+          'descriptionEn', 'descriptionAr', 'durationLabel', 'affiliateUrl'
+        ]);
+      allow delete: if isValidId(courseId) && isAdmin();
+    }
+
+    match /question_bank/{questionId} {
+      allow get: if isValidId(questionId);
+      allow list: if true;
+      allow create: if isValidId(questionId) && isAdmin() && isValidQuestionBankItem(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(questionId) && isAdmin() && isValidQuestionBankItem(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'gradeId', 'unitLabel', 'prompt', 'options', 'correctIndex', 'explanation'
+        ]);
+      allow delete: if isValidId(questionId) && isAdmin();
+    }
+
+    match /teacher_subscriptions/{uid} {
+      allow get: if isValidId(uid) && isVerifiedUser() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isAdmin() && isValidTeacherSubscription(incoming())
+        && incoming().ownerUid == uid
+        && incoming().activatedByUid == request.auth.uid
+        && incoming().activatedAt == request.time;
+      allow update: if isValidId(uid) && isAdmin() && isValidTeacherSubscription(incoming())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().activatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'teacherName', 'teacherEmail', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
+        ]);
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /teacher_quizzes/{quizId} {
+      allow get: if isValidId(quizId) && (
+        existing().isPublished == true ||
+        (isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin()))
+      );
+      allow list: if isVerifiedUser() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(quizId) && isVerifiedUser() && isValidTeacherQuiz(incoming())
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (
+          (incoming().isTrial == true && quizId == ('trial_' + request.auth.uid)) ||
+          isAdmin() ||
+          (
+            exists(/databases/$(database)/documents/teacher_subscriptions/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/teacher_subscriptions/$(request.auth.uid)).data.active == true
+          )
+        );
+      allow update: if isValidId(quizId) && isVerifiedUser() && isValidTeacherQuiz(incoming())
+        && (existing().ownerUid == request.auth.uid || isAdmin())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().isTrial == existing().isTrial
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'gradeLabel', 'teacherName', 'schoolOrCenter',
+          'isPublished', 'timeLimitMinutes', 'questions'
+        ]);
+      allow delete: if isValidId(quizId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /quiz_attempts/{attemptId} {
+      allow get: if isValidId(attemptId) && isVerifiedUser() && (existing().quizOwnerUid == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.quizOwnerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(attemptId) && isValidQuizAttempt(incoming())
+        && incoming().submittedAt == request.time
+        && exists(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId))
+        && get(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId)).data.ownerUid == incoming().quizOwnerUid
+        && get(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId)).data.isPublished == true;
+      allow update: if false;
+      allow delete: if isValidId(attemptId) && isVerifiedUser() && (existing().quizOwnerUid == request.auth.uid || isAdmin());
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isVerifiedUser() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isAdmin() && isValidAdminMember(incoming()) && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /test/{docId} {
+      allow get: if isValidId(docId);
+      allow list: if false;
+      allow write: if false;
+    }
+  }
+}
