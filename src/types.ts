@@ -1,6 +1,46 @@
 export type Lang = 'ar' | 'en';
 
-export type ResourceCategory = 'prep' | 'exam' | 'activity';
+export type ResourceCategory = 'prep' | 'exam' | 'worksheet' | 'activity';
+
+export type WorksheetLevel = 'age_3_5' | 'age_5_7' | 'primary' | 'prep_sec';
+
+export type WorksheetTrack =
+  | 'arabic_letters'
+  | 'english_letters'
+  | 'numbers'
+  | 'writing_skills'
+  | 'general';
+
+export interface WorksheetPack {
+  id: string;
+  packNumber: number;
+  levelId: WorksheetLevel;
+  track: WorksheetTrack;
+  titleEn: string;
+  titleAr: string;
+  descriptionEn: string;
+  descriptionAr: string;
+  isPaid: boolean;
+  priceEgp: number;
+  allowWhiteLabel: boolean;
+  authorUid: string;
+  createdAt?: unknown;
+}
+
+export interface WorksheetPackItem {
+  id: string;
+  packId: string;
+  itemOrder: number;
+  titleEn: string;
+  titleAr: string;
+  kind: 'worksheet' | 'activity';
+  isFreeSample: boolean;
+  contentText: string;
+  fileName?: string;
+  fileDataUrl?: string;
+  authorUid: string;
+  createdAt?: unknown;
+}
 
 export interface GradeInfo {
   id: string;
@@ -14,13 +54,89 @@ export interface GradeInfo {
 export interface AcademySettings {
   academyNameEn: string;
   academyNameAr: string;
+  logoDataUrl?: string;
   instapayHandle: string;
   instapayUrl?: string;
   whatsappNumber: string;
   whiteLabelPriceEgp: number;
   aiCertificatePriceEgp: number;
+  quizTermPriceEgp?: number;
   seeded: boolean;
   updatedAt?: unknown;
+}
+
+export type CourseTrack = 'phonics' | 'methodology' | 'ai_teaching' | 'career';
+
+export interface AffiliateCourse {
+  id: string;
+  titleEn: string;
+  titleAr: string;
+  provider: string;
+  track: CourseTrack;
+  descriptionEn: string;
+  descriptionAr: string;
+  durationLabel: string;
+  affiliateUrl: string;
+  authorUid: string;
+  createdAt?: unknown;
+}
+
+export interface QuizQuestionItem {
+  id: string;
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  explanation?: string;
+}
+
+export interface QuestionBankItem {
+  id: string;
+  gradeId: string;
+  unitLabel: string;
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  explanation?: string;
+  authorUid: string;
+  createdAt?: unknown;
+}
+
+export interface TeacherQuiz {
+  id: string;
+  title: string;
+  gradeLabel: string;
+  teacherName: string;
+  schoolOrCenter?: string;
+  isTrial: boolean;
+  isPublished: boolean;
+  timeLimitMinutes: number;
+  questions: QuizQuestionItem[];
+  ownerUid: string;
+  createdAt?: unknown;
+}
+
+export interface QuizAttempt {
+  id: string;
+  quizId: string;
+  quizOwnerUid: string;
+  studentName: string;
+  studentGroup?: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  answers: number[];
+  submittedAt?: unknown;
+}
+
+export interface TeacherSubscription {
+  id: string;
+  ownerUid: string;
+  teacherName: string;
+  teacherEmail?: string;
+  termLabel: string;
+  active: boolean;
+  activatedByUid: string;
+  activatedAt?: unknown;
 }
 
 export interface GradeResource {
@@ -107,7 +223,16 @@ export interface TeacherPrep {
 
 export interface OrderRecord {
   id: string;
-  itemType: 'activity' | 'exam' | 'story' | 'whitelabel' | 'certificate' | 'paper';
+  itemType:
+    | 'activity'
+    | 'worksheet'
+    | 'worksheet_pack'
+    | 'exam'
+    | 'story'
+    | 'whitelabel'
+    | 'certificate'
+    | 'paper'
+    | 'quiz_term';
   itemTitle: string;
   amountEgp: number;
   customerName: string;

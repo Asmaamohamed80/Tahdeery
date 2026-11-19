@@ -33,22 +33,33 @@ import {
 import {
   DEFAULT_SETTINGS,
   HERO_BANNER_IMAGE,
+  STARTER_COURSES,
   STARTER_NEWS,
   STARTER_PAPERS,
+  STARTER_QUESTION_BANK,
   STARTER_RESOURCES,
   STARTER_STORIES,
+  STARTER_WORKSHEET_ITEMS,
+  STARTER_WORKSHEET_PACKS,
 } from './data/starterCatalog';
 import {
   GRADES,
   type AcademySettings,
+  type AffiliateCourse,
   type GradeResource,
   type Lang,
   type NewsItem,
   type OfficialPaper,
   type OrderRecord,
   type PaymentIntent,
+  type QuestionBankItem,
+  type QuizAttempt,
   type ResourceCategory,
   type StoryItem,
+  type TeacherQuiz,
+  type TeacherSubscription,
+  type WorksheetPack,
+  type WorksheetPackItem,
 } from './types';
 import { t } from './i18n';
 import { downloadTextOrHtmlFile } from './utils/download';
@@ -58,7 +69,11 @@ import { InteractiveQuizModal } from './components/InteractiveQuizModal';
 import { CertificateStudio } from './components/CertificateStudio';
 import { TeacherPrepStudio } from './components/TeacherPrepStudio';
 import { SharedPrepViewer } from './components/SharedPrepViewer';
-import { AdminDashboardModal } from './components/AdminDashboardModal';
+import { WorksheetPacksSection } from './components/WorksheetPacksSection';
+import { CoursesAffiliateSection } from './components/CoursesAffiliateSection';
+import { TeacherQuizSection } from './components/TeacherQuizSection';
+import { PublicQuizViewer } from './components/PublicQuizViewer';
+import { AdminDashboardModal, type AdminTab } from './components/AdminDashboardModal';
 
 export default function App() {
   const [lang, setLang] = useState<Lang>('ar');
@@ -70,6 +85,14 @@ export default function App() {
   const [cloudStories, setCloudStories] = useState<StoryItem[]>([]);
   const [cloudPapers, setCloudPapers] = useState<OfficialPaper[]>([]);
   const [cloudNews, setCloudNews] = useState<NewsItem[]>([]);
+  const [cloudPacks, setCloudPacks] = useState<WorksheetPack[]>([]);
+  const [cloudPackItems, setCloudPackItems] = useState<WorksheetPackItem[]>([]);
+  const [cloudCourses, setCloudCourses] = useState<AffiliateCourse[]>([]);
+  const [cloudQuestionBank, setCloudQuestionBank] = useState<QuestionBankItem[]>([]);
+  const [myQuizzes, setMyQuizzes] = useState<TeacherQuiz[]>([]);
+  const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([]);
+  const [mySubscription, setMySubscription] = useState<TeacherSubscription | null>(null);
+  const [adminSubscriptions, setAdminSubscriptions] = useState<TeacherSubscription[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [cloudLoaded, setCloudLoaded] = useState(false);
 
@@ -81,9 +104,14 @@ export default function App() {
   const [activeQuiz, setActiveQuiz] = useState<GradeResource | null>(null);
   const [excerptStory, setExcerptStory] = useState<StoryItem | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [adminInitialTab, setAdminInitialTab] = useState<AdminTab>('resources');
   const [sharedPrepId, setSharedPrepId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('prep');
+  });
+  const [sharedQuizId, setSharedQuizId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('quiz');
   });
 
   const labels = t(lang);
@@ -157,21 +185,77 @@ export default function App() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'news')
     );
 
+    const unsubPacks = onSnapshot(
+      query(collection(db, 'worksheet_packs'), orderBy('packNumber', 'asc')),
+      (snap) => {
+        setCloudPacks(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorksheetPack, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'worksheet_packs')
+    );
+
+    const unsubPackItems = onSnapshot(
+      query(collection(db, 'worksheet_items'), orderBy('itemOrder', 'asc')),
+      (snap) => {
+        setCloudPackItems(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorksheetPackItem, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'worksheet_items')
+    );
+
+    const unsubCourses = onSnapshot(
+      query(collection(db, 'affiliate_courses'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setCloudCourses(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AffiliateCourse, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'affiliate_courses')
+    );
+
+    const unsubBank = onSnapshot(
+      query(collection(db, 'question_bank'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setCloudQuestionBank(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<QuestionBankItem, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'question_bank')
+    );
+
     return () => {
       unsubSettings();
       unsubResources();
       unsubStories();
       unsubPapers();
       unsubNews();
+      unsubPacks();
+      unsubPackItems();
+      unsubCourses();
+      unsubBank();
     };
   }, []);
 
-  // Orders listener (authenticated users only)
+  // Orders, teacher quizzes, attempts & subscriptions listeners (authenticated users only)
   useEffect(() => {
     if (!authReady || !user || !user.emailVerified) {
       setOrders([]);
+      setMyQuizzes([]);
+      setQuizAttempts([]);
+      setMySubscription(null);
+      setAdminSubscriptions([]);
       return;
     }
+
+    const toMillis = (ts: unknown): number => {
+      if (ts && typeof ts === 'object' && 'toMillis' in ts && typeof (ts as { toMillis: () => number }).toMillis === 'function') {
+        return (ts as { toMillis: () => number }).toMillis();
+      }
+      return 0;
+    };
+
     const ordersQuery = isAdmin
       ? query(collection(db, 'orders'), orderBy('createdAt', 'desc'))
       : query(
@@ -187,7 +271,72 @@ export default function App() {
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'orders')
     );
-    return unsubOrders;
+
+    const quizzesQuery = isAdmin
+      ? collection(db, 'teacher_quizzes')
+      : query(collection(db, 'teacher_quizzes'), where('ownerUid', '==', user.uid));
+
+    const unsubQuizzes = onSnapshot(
+      quizzesQuery,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TeacherQuiz, 'id'>) }));
+        list.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+        setMyQuizzes(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'teacher_quizzes')
+    );
+
+    const attemptsQuery = isAdmin
+      ? collection(db, 'quiz_attempts')
+      : query(collection(db, 'quiz_attempts'), where('quizOwnerUid', '==', user.uid));
+
+    const unsubAttempts = onSnapshot(
+      attemptsQuery,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<QuizAttempt, 'id'>) }));
+        list.sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt));
+        setQuizAttempts(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'quiz_attempts')
+    );
+
+    const unsubMySub = onSnapshot(
+      doc(db, 'teacher_subscriptions', user.uid),
+      (snap) => {
+        if (snap.exists()) {
+          setMySubscription({ id: snap.id, ...(snap.data() as Omit<TeacherSubscription, 'id'>) });
+        } else {
+          setMySubscription(null);
+        }
+      },
+      (err) => handleFirestoreError(err, OperationType.GET, `teacher_subscriptions/${user.uid}`)
+    );
+
+    let unsubAdminSubs: (() => void) | undefined;
+    if (isAdmin) {
+      unsubAdminSubs = onSnapshot(
+        collection(db, 'teacher_subscriptions'),
+        (snap) => {
+          const list = snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<TeacherSubscription, 'id'>),
+          }));
+          list.sort((a, b) => toMillis(b.activatedAt) - toMillis(a.activatedAt));
+          setAdminSubscriptions(list);
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'teacher_subscriptions')
+      );
+    } else {
+      setAdminSubscriptions([]);
+    }
+
+    return () => {
+      unsubOrders();
+      unsubQuizzes();
+      unsubAttempts();
+      unsubMySub();
+      if (unsubAdminSubs) unsubAdminSubs();
+    };
   }, [authReady, user, isAdmin]);
 
   const handleSignIn = async () => {
@@ -247,12 +396,137 @@ export default function App() {
         createdAt: serverTimestamp(),
       });
     });
+    STARTER_WORKSHEET_PACKS.forEach((pack) => {
+      const { id, ...rest } = pack;
+      batch.set(doc(db, 'worksheet_packs', id), {
+        ...rest,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    });
+    STARTER_WORKSHEET_ITEMS.forEach((sheet) => {
+      const { id, ...rest } = sheet;
+      batch.set(doc(db, 'worksheet_items', id), {
+        ...rest,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    });
+    STARTER_COURSES.forEach((course) => {
+      const { id, ...rest } = course;
+      batch.set(doc(db, 'affiliate_courses', id), {
+        ...rest,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    });
+    STARTER_QUESTION_BANK.forEach((qItem) => {
+      const { id, ...rest } = qItem;
+      batch.set(doc(db, 'question_bank', id), {
+        ...rest,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    });
     batch.set(doc(db, 'settings', 'global'), {
       ...DEFAULT_SETTINGS,
       seeded: true,
       updatedAt: serverTimestamp(),
     });
     await batch.commit();
+  };
+
+  const handleSeedMissingWorksheetsAndActivities = async () => {
+    if (!user || !isAdmin) return;
+    const existingIds = new Set(cloudResources.map((r) => r.id));
+    const missing = STARTER_RESOURCES.filter(
+      (item) =>
+        (item.category === 'worksheet' || (item.category === 'activity' && !item.isInteractive)) &&
+        !existingIds.has(item.id)
+    );
+    if (missing.length === 0) return;
+    const batch = writeBatch(db);
+    missing.forEach((item) => {
+      const { id, ...rest } = item;
+      batch.set(doc(db, 'grades_resources', id), {
+        ...rest,
+        authorUid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  };
+
+  const handleSeedStarterPacks = async () => {
+    if (!user || !isAdmin) return;
+    const existingPackIds = new Set(cloudPacks.map((p) => p.id));
+    const existingSheetIds = new Set(cloudPackItems.map((s) => s.id));
+    const batch = writeBatch(db);
+    let ops = 0;
+
+    STARTER_WORKSHEET_PACKS.forEach((pack) => {
+      if (!existingPackIds.has(pack.id)) {
+        const { id, ...rest } = pack;
+        batch.set(doc(db, 'worksheet_packs', id), {
+          ...rest,
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        ops++;
+      }
+    });
+
+    STARTER_WORKSHEET_ITEMS.forEach((sheet) => {
+      if (!existingSheetIds.has(sheet.id)) {
+        const { id, ...rest } = sheet;
+        batch.set(doc(db, 'worksheet_items', id), {
+          ...rest,
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        ops++;
+      }
+    });
+
+    if (ops > 0) {
+      await batch.commit();
+    }
+  };
+
+  const handleSeedCoursesAndBank = async () => {
+    if (!user || !isAdmin) return;
+    const existingCourseIds = new Set(cloudCourses.map((c) => c.id));
+    const existingBankIds = new Set(cloudQuestionBank.map((q) => q.id));
+    const batch = writeBatch(db);
+    let ops = 0;
+
+    STARTER_COURSES.forEach((course) => {
+      if (!existingCourseIds.has(course.id)) {
+        const { id, ...rest } = course;
+        batch.set(doc(db, 'affiliate_courses', id), {
+          ...rest,
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        ops++;
+      }
+    });
+
+    STARTER_QUESTION_BANK.forEach((qItem) => {
+      if (!existingBankIds.has(qItem.id)) {
+        const { id, ...rest } = qItem;
+        batch.set(doc(db, 'question_bank', id), {
+          ...rest,
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        ops++;
+      }
+    });
+
+    if (ops > 0) {
+      await batch.commit();
+    }
   };
 
   // Auto-seed starter catalog once when admin first signs in if database hasn't been seeded yet
@@ -284,6 +558,26 @@ export default function App() {
     return STARTER_NEWS.map((n) => ({ ...n, authorUid: 'starter' }));
   }, [settings.seeded, cloudNews]);
 
+  const packs: WorksheetPack[] = useMemo(() => {
+    if (cloudPacks.length > 0) return cloudPacks;
+    return STARTER_WORKSHEET_PACKS.map((p) => ({ ...p, authorUid: 'starter' }));
+  }, [cloudPacks]);
+
+  const packItems: WorksheetPackItem[] = useMemo(() => {
+    if (cloudPackItems.length > 0) return cloudPackItems;
+    return STARTER_WORKSHEET_ITEMS.map((i) => ({ ...i, authorUid: 'starter' }));
+  }, [cloudPackItems]);
+
+  const courses: AffiliateCourse[] = useMemo(() => {
+    if (cloudCourses.length > 0) return cloudCourses;
+    return STARTER_COURSES.map((c) => ({ ...c, authorUid: 'starter' }));
+  }, [cloudCourses]);
+
+  const questionBank: QuestionBankItem[] = useMemo(() => {
+    if (cloudQuestionBank.length > 0) return cloudQuestionBank;
+    return STARTER_QUESTION_BANK.map((q) => ({ ...q, authorUid: 'starter' }));
+  }, [cloudQuestionBank]);
+
   const visibleGrades = useMemo(() => {
     if (stageFilter === 'all') return GRADES;
     return GRADES.filter((g) => g.stage === stageFilter);
@@ -305,6 +599,29 @@ export default function App() {
     }
   };
 
+  if (sharedQuizId) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900">
+        <Header
+          lang={lang}
+          user={user}
+          isAdmin={isAdmin}
+          onOpenAdmin={() => setAdminOpen(true)}
+          onSignIn={handleSignIn}
+        />
+        <PublicQuizViewer
+          quizId={sharedQuizId}
+          lang={lang}
+          settings={settings}
+          onBackHome={() => {
+            window.history.replaceState({}, '', '/');
+            setSharedQuizId(null);
+          }}
+        />
+      </div>
+    );
+  }
+
   if (sharedPrepId) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -318,6 +635,7 @@ export default function App() {
         <SharedPrepViewer
           prepId={sharedPrepId}
           lang={lang}
+          settings={settings}
           onBackHome={() => {
             window.history.replaceState({}, '', '/');
             setSharedPrepId(null);
@@ -341,6 +659,14 @@ export default function App() {
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-xs text-slate-600">
+            {settings.logoDataUrl && (
+              <img
+                src={settings.logoDataUrl}
+                alt={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                referrerPolicy="no-referrer"
+                className="h-7 w-auto max-w-[96px] object-contain rounded shrink-0"
+              />
+            )}
             <span className="font-semibold text-slate-900">
               {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
             </span>
@@ -497,6 +823,7 @@ export default function App() {
                     ['all', labels.catAll],
                     ['prep', labels.catPrep],
                     ['exam', labels.catExam],
+                    ['worksheet', labels.catWorksheet],
                     ['activity', labels.catActivity],
                   ] as const
                 ).map(([catKey, catLabel]) => (
@@ -559,6 +886,8 @@ export default function App() {
                     ? labels.catPrep
                     : item.category === 'exam'
                     ? labels.catExam
+                    : item.category === 'worksheet'
+                    ? labels.catWorksheet
                     : labels.catActivity;
 
                 return (
@@ -574,12 +903,17 @@ export default function App() {
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>{categoryText}</span>
-                        {item.isInteractive && (
+                        {item.isInteractive ? (
                           <>
                             <span aria-hidden="true">·</span>
                             <span>{labels.interactiveLabel}</span>
                           </>
-                        )}
+                        ) : (item.category === 'activity' || item.category === 'worksheet') ? (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{labels.nonInteractiveLabel}</span>
+                          </>
+                        ) : null}
                         <span aria-hidden="true">·</span>
                         <span className={item.isPaid ? 'font-semibold text-amber-700 font-mono-num' : 'font-semibold text-emerald-700'}>
                           {item.isPaid ? `${item.priceEgp} ${labels.egp}` : labels.freeLabel}
@@ -607,7 +941,8 @@ export default function App() {
                                 subtitle: `${lang === 'ar' ? gradeMeta?.nameAr : gradeMeta?.nameEn} · ${categoryText}`,
                                 bodyText: item.contentText,
                                 fileDataUrl: item.fileDataUrl,
-                                brandHeader: settings.academyNameEn,
+                                brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
+                                logoDataUrl: settings.logoDataUrl,
                               })
                             }
                             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-700 rounded-xl hover:bg-emerald-600 transition-colors whitespace-nowrap"
@@ -642,7 +977,12 @@ export default function App() {
                             type="button"
                             onClick={() =>
                               setPaymentIntent({
-                                itemType: item.category === 'exam' ? 'exam' : 'activity',
+                                itemType:
+                                  item.category === 'exam'
+                                    ? 'exam'
+                                    : item.category === 'worksheet'
+                                    ? 'worksheet'
+                                    : 'activity',
                                 itemTitle: lang === 'ar' ? item.titleAr : item.titleEn,
                                 amountEgp: item.priceEgp,
                               })
@@ -687,8 +1027,22 @@ export default function App() {
         </div>
       </section>
 
+      {/* Section 1B: Numbered Worksheet & Foundation Activity Library */}
+      <WorksheetPacksSection
+        lang={lang}
+        packs={packs}
+        items={packItems}
+        settings={settings}
+        isAdmin={isAdmin}
+        onOpenAdminPacks={() => {
+          setAdminInitialTab('packs');
+          setAdminOpen(true);
+        }}
+        onRequestPayment={(intent) => setPaymentIntent(intent)}
+      />
+
       {/* Section 2: Illustrated English Stories (Paid via InstaPay -> WhatsApp) */}
-      <section id="stories" className="py-16 sm:py-20 bg-white border-t border-slate-200">
+      <section id="stories" className="py-16 sm:py-20 bg-slate-50 border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
           <div className="max-w-3xl space-y-2.5">
             <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 text-balance">
@@ -698,7 +1052,7 @@ export default function App() {
           </div>
 
           {stories.length === 0 ? (
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-10 text-center text-slate-500 text-sm">
+            <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-500 text-sm">
               {labels.emptyItems}
             </div>
           ) : (
@@ -706,7 +1060,7 @@ export default function App() {
               {stories.map((story) => (
                 <article
                   key={story.id}
-                  className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden grid grid-cols-1 sm:grid-cols-12"
+                  className="bg-white border border-slate-200 rounded-2xl overflow-hidden grid grid-cols-1 sm:grid-cols-12"
                 >
                   <div className="sm:col-span-5 aspect-[4/3] sm:aspect-auto bg-gradient-to-br from-sky-900 to-amber-700">
                     <img
@@ -718,6 +1072,19 @@ export default function App() {
                   </div>
                   <div className="sm:col-span-7 p-6 flex flex-col justify-between gap-4">
                     <div className="space-y-2">
+                      {settings.logoDataUrl && (
+                        <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
+                          <img
+                            src={settings.logoDataUrl}
+                            alt={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                            referrerPolicy="no-referrer"
+                            className="h-5 w-auto max-w-[72px] object-contain rounded shrink-0"
+                          />
+                          <span className="text-[11px] font-semibold text-slate-600 truncate">
+                            {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <span>{story.levelLabel}</span>
                         <span aria-hidden="true">·</span>
@@ -773,10 +1140,36 @@ export default function App() {
         onOrderCertificate={(intent) => setPaymentIntent(intent)}
       />
 
-      {/* Section 4: Teacher Lesson Prep Studio + Facebook Sharing */}
-      <TeacherPrepStudio lang={lang} user={user} onRequireSignIn={handleSignIn} />
+      {/* Section 4: Question Bank & Term-Subscribed Teacher Quiz Studio */}
+      <TeacherQuizSection
+        lang={lang}
+        user={user}
+        isAdmin={isAdmin}
+        settings={settings}
+        questionBank={questionBank}
+        myQuizzes={myQuizzes}
+        attempts={quizAttempts}
+        subscription={mySubscription}
+        onRequireSignIn={handleSignIn}
+        onRequestPayment={(intent) => setPaymentIntent(intent)}
+        onPreviewStudentDemo={() => setSharedQuizId('demo_preview')}
+      />
 
-      {/* Section 5: Official Papers & Simple News */}
+      {/* Section 5: Free Affiliate Courses for Teachers */}
+      <CoursesAffiliateSection
+        lang={lang}
+        courses={courses}
+        isAdmin={isAdmin}
+        onOpenAdminCourses={() => {
+          setAdminInitialTab('courses');
+          setAdminOpen(true);
+        }}
+      />
+
+      {/* Section 6: Teacher Lesson Prep Studio + Facebook Sharing */}
+      <TeacherPrepStudio lang={lang} user={user} settings={settings} onRequireSignIn={handleSignIn} />
+
+      {/* Section 7: Official Papers & Simple News */}
       <section id="papers-news" className="py-16 sm:py-20 bg-white border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-12 gap-10">
           {/* Official School Papers */}
@@ -820,7 +1213,8 @@ export default function App() {
                           subtitle: lang === 'ar' ? paper.categoryAr : paper.categoryEn,
                           bodyText: paper.contentText,
                           fileDataUrl: paper.fileDataUrl,
-                          brandHeader: settings.academyNameEn,
+                          brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
+                          logoDataUrl: settings.logoDataUrl,
                         })
                       }
                       className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap shrink-0"
@@ -897,7 +1291,20 @@ export default function App() {
       {excerptStory && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-xl">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
+              {settings.logoDataUrl && (
+                <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                  <img
+                    src={settings.logoDataUrl}
+                    alt={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                    referrerPolicy="no-referrer"
+                    className="h-6 w-auto max-w-[84px] object-contain rounded shrink-0"
+                  />
+                  <span className="text-xs font-semibold text-slate-600">
+                    {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                  </span>
+                </div>
+              )}
               <p className="text-xs font-semibold text-sky-900">{excerptStory.levelLabel}</p>
               <h3 className="text-xl font-bold text-slate-900">
                 {lang === 'ar' ? excerptStory.titleAr : excerptStory.titleEn}
@@ -941,6 +1348,8 @@ export default function App() {
       <InteractiveQuizModal
         resource={activeQuiz}
         lang={lang}
+        academyName={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+        logoDataUrl={settings.logoDataUrl}
         onClose={() => setActiveQuiz(null)}
         onBuyFull={(res) =>
           setPaymentIntent({
@@ -963,20 +1372,35 @@ export default function App() {
       {/* Admin Control Panel */}
       <AdminDashboardModal
         open={adminOpen}
+        initialTab={adminInitialTab}
         lang={lang}
         user={user}
         isAdmin={isAdmin}
         settings={settings}
         resources={resources}
+        packs={packs}
+        packItems={packItems}
+        courses={courses}
+        questionBank={questionBank}
+        subscriptions={adminSubscriptions}
+        hasCloudPacks={cloudPacks.length > 0}
+        hasCloudCourses={cloudCourses.length > 0}
+        hasCloudQuestionBank={cloudQuestionBank.length > 0}
         stories={stories}
         papers={papers}
         news={news}
         orders={orders}
-        onClose={() => setAdminOpen(false)}
+        onClose={() => {
+          setAdminOpen(false);
+          setAdminInitialTab('resources');
+        }}
         onSignIn={handleSignIn}
         onSignOut={handleSignOut}
         onSwitchAccount={handleSwitchAccount}
         onSeedStarterData={handleSeedStarterData}
+        onSeedMissingWorksheetsAndActivities={handleSeedMissingWorksheetsAndActivities}
+        onSeedStarterPacks={handleSeedStarterPacks}
+        onSeedCoursesAndBank={handleSeedCoursesAndBank}
       />
     </div>
   );

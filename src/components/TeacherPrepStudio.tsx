@@ -11,17 +11,18 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import type { Lang, TeacherPrep } from '../types';
+import type { AcademySettings, Lang, TeacherPrep } from '../types';
 import { downloadTextOrHtmlFile } from '../utils/download';
 import { t } from '../i18n';
 
 interface TeacherPrepStudioProps {
   lang: Lang;
   user: User | null;
+  settings?: AcademySettings;
   onRequireSignIn: () => void;
 }
 
-export function TeacherPrepStudio({ lang, user, onRequireSignIn }: TeacherPrepStudioProps) {
+export function TeacherPrepStudio({ lang, user, settings, onRequireSignIn }: TeacherPrepStudioProps) {
   const labels = t(lang);
 
   const [teacherName, setTeacherName] = useState(user?.displayName || '');
@@ -177,7 +178,12 @@ ${homework}`;
       title: lessonTitle,
       subtitle: `${gradeLabel} · ${unitTitle}`,
       bodyText: body,
-      brandHeader: schoolOrCenter || teacherName || 'Teacher Lesson Preparation',
+      brandHeader:
+        schoolOrCenter ||
+        (lang === 'ar' ? settings?.academyNameAr : settings?.academyNameEn) ||
+        teacherName ||
+        'Teacher Lesson Preparation',
+      logoDataUrl: settings?.logoDataUrl,
     });
   };
 
@@ -212,6 +218,24 @@ ${homework}`;
             onSubmit={handleSaveAndShare}
             className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5"
           >
+            {settings?.logoDataUrl && (
+              <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img
+                    src={settings.logoDataUrl}
+                    alt={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                    referrerPolicy="no-referrer"
+                    className="h-7 w-auto max-w-[96px] object-contain rounded shrink-0"
+                  />
+                  <span className="text-xs font-semibold text-slate-700 truncate">
+                    {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400 shrink-0">
+                  {lang === 'ar' ? 'يُضاف تلقائياً أعلى التحضير' : 'Auto-added to top header'}
+                </span>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">

@@ -33,28 +33,28 @@ export function Header({ lang, user, isAdmin, onOpenAdmin, onSignIn }: HeaderPro
             {labels.navGrades}
           </a>
           <a
+            href="#quiz-builder"
+            className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            {labels.navQuizBank}
+          </a>
+          <a
+            href="#courses"
+            className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            {labels.navCourses}
+          </a>
+          <a
             href="#stories"
             className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             {labels.navStories}
           </a>
           <a
-            href="#certificates"
-            className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            {labels.navCertificates}
-          </a>
-          <a
             href="#teacher-studio"
             className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             {labels.navTeacherStudio}
-          </a>
-          <a
-            href="#papers-news"
-            className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            {labels.navPapersNews}
           </a>
         </nav>
 

@@ -200,34 +200,59 @@ export function CertificateStudio({
     ctx.fillText('SAMPLE PREVIEW', 0, 0);
     ctx.restore();
 
-    const finishExport = () => {
-      const link = document.createElement('a');
-      link.download = `Certificate_Preview_${studentName.replace(/\s+/g, '_')}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-    };
+    const loadOptionalImage = (src?: string): Promise<HTMLImageElement | null> =>
+      new Promise((resolve) => {
+        if (!src) {
+          resolve(null);
+          return;
+        }
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => resolve(null);
+        im.src = src;
+      });
 
-    if (photoPreview) {
-      const img = new Image();
-      img.onload = () => {
+    void Promise.all([
+      loadOptionalImage(settings.logoDataUrl),
+      loadOptionalImage(photoPreview),
+    ]).then(([logoImg, childImg]) => {
+      if (logoImg) {
+        const targetH = 44;
+        const targetW = Math.min(130, Math.round((logoImg.width / Math.max(1, logoImg.height)) * targetH));
+        ctx.drawImage(logoImg, 84, 74, targetW, targetH);
+        ctx.fillStyle = '#475569';
+        ctx.textAlign = 'left';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(settings.academyNameEn.toUpperCase(), 84 + targetW + 14, 102);
+        ctx.textAlign = 'center';
+      } else {
+        ctx.fillStyle = '#64748b';
+        ctx.textAlign = 'left';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(settings.academyNameEn.toUpperCase(), 84, 100);
+        ctx.textAlign = 'center';
+      }
+
+      if (childImg) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(canvas.width / 2, 665, 95, 0, Math.PI * 2);
         ctx.closePath();
         ctx.clip();
-        ctx.drawImage(img, canvas.width / 2 - 95, 570, 190, 190);
+        ctx.drawImage(childImg, canvas.width / 2 - 95, 570, 190, 190);
         ctx.restore();
         ctx.strokeStyle = '#d97706';
         ctx.lineWidth = 6;
         ctx.beginPath();
         ctx.arc(canvas.width / 2, 665, 95, 0, Math.PI * 2);
         ctx.stroke();
-        finishExport();
-      };
-      img.src = photoPreview;
-    } else {
-      finishExport();
-    }
+      }
+
+      const link = document.createElement('a');
+      link.download = `Certificate_Preview_${studentName.replace(/\s+/g, '_')}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
   };
 
   const activeTheme = THEME_STYLES[theme];
@@ -371,8 +396,18 @@ export function CertificateStudio({
             >
               <div className="border border-slate-300/80 rounded-xl p-6 sm:p-8 text-center space-y-5 relative z-10">
                 <div className="flex items-center justify-between gap-4 text-xs text-slate-500">
-                  <span className="font-semibold tracking-wider uppercase">{settings.academyNameEn}</span>
-                  <span>{aiResult.badgeMotto}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {settings.logoDataUrl && (
+                      <img
+                        src={settings.logoDataUrl}
+                        alt={settings.academyNameEn}
+                        referrerPolicy="no-referrer"
+                        className="h-7 w-auto max-w-[90px] object-contain rounded shrink-0"
+                      />
+                    )}
+                    <span className="font-semibold tracking-wider uppercase truncate">{settings.academyNameEn}</span>
+                  </div>
+                  <span className="shrink-0">{aiResult.badgeMotto}</span>
                 </div>
 
                 <h3 className={`text-2xl sm:text-3xl font-bold tracking-tight ${activeTheme.accentText}`}>

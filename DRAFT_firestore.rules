@@ -39,17 +39,19 @@ service cloud.firestore {
           'seeded', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'academyNameEn', 'academyNameAr', 'instapayHandle', 'instapayUrl',
-          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp',
+          'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
+          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
           'seeded', 'updatedAt'
         ])
         && data.academyNameEn is string && data.academyNameEn.size() >= 2 && data.academyNameEn.size() <= 100
         && data.academyNameAr is string && data.academyNameAr.size() >= 2 && data.academyNameAr.size() <= 100
+        && (!data.keys().hasAny(['logoDataUrl']) || (data.logoDataUrl is string && data.logoDataUrl.size() <= 150000))
         && data.instapayHandle is string && data.instapayHandle.size() >= 2 && data.instapayHandle.size() <= 120
         && (!data.keys().hasAny(['instapayUrl']) || (data.instapayUrl is string && data.instapayUrl.size() <= 300))
         && data.whatsappNumber is string && data.whatsappNumber.size() >= 6 && data.whatsappNumber.size() <= 25
         && data.whiteLabelPriceEgp is number && data.whiteLabelPriceEgp >= 0 && data.whiteLabelPriceEgp <= 100000
         && data.aiCertificatePriceEgp is number && data.aiCertificatePriceEgp >= 0 && data.aiCertificatePriceEgp <= 100000
+        && (!data.keys().hasAny(['quizTermPriceEgp']) || (data.quizTermPriceEgp is number && data.quizTermPriceEgp >= 0 && data.quizTermPriceEgp <= 100000))
         && data.seeded is bool
         && data.updatedAt is timestamp;
     }
@@ -68,7 +70,7 @@ service cloud.firestore {
           'fileName', 'fileDataUrl', 'authorUid', 'createdAt'
         ])
         && data.gradeId is string && data.gradeId.size() >= 2 && data.gradeId.size() <= 32
-        && data.category in ['prep', 'exam', 'activity']
+        && data.category in ['prep', 'exam', 'worksheet', 'activity']
         && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
         && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
         && data.descriptionEn is string && data.descriptionEn.size() <= 1200
@@ -188,7 +190,7 @@ service cloud.firestore {
           'itemType', 'itemTitle', 'amountEgp', 'customerName',
           'customBrandingName', 'instapayRef', 'status', 'ownerUid', 'createdAt'
         ])
-        && data.itemType in ['activity', 'exam', 'story', 'whitelabel', 'certificate', 'paper']
+        && data.itemType in ['activity', 'worksheet', 'worksheet_pack', 'exam', 'story', 'whitelabel', 'certificate', 'paper', 'quiz_term']
         && data.itemTitle is string && data.itemTitle.size() >= 2 && data.itemTitle.size() <= 180
         && data.amountEgp is number && data.amountEgp >= 0 && data.amountEgp <= 100000
         && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
@@ -203,6 +205,54 @@ service cloud.firestore {
       return data.keys().hasAll(['email', 'createdAt'])
         && data.keys().hasOnly(['email', 'createdAt'])
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWorksheetPack(data) {
+      return data.keys().hasAll([
+          'packNumber', 'levelId', 'track', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isPaid', 'priceEgp',
+          'allowWhiteLabel', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'packNumber', 'levelId', 'track', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isPaid', 'priceEgp',
+          'allowWhiteLabel', 'authorUid', 'createdAt'
+        ])
+        && data.packNumber is number && data.packNumber >= 1 && data.packNumber <= 9999
+        && data.levelId in ['age_3_5', 'age_5_7', 'primary', 'prep_sec']
+        && data.track in ['arabic_letters', 'english_letters', 'numbers', 'writing_skills', 'general']
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1200
+        && data.descriptionAr is string && data.descriptionAr.size() <= 1200
+        && data.isPaid is bool
+        && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
+        && data.allowWhiteLabel is bool
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWorksheetPackItem(data) {
+      return data.keys().hasAll([
+          'packId', 'itemOrder', 'titleEn', 'titleAr',
+          'kind', 'isFreeSample', 'contentText', 'authorUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'packId', 'itemOrder', 'titleEn', 'titleAr',
+          'kind', 'isFreeSample', 'contentText', 'fileName', 'fileDataUrl',
+          'authorUid', 'createdAt'
+        ])
+        && isValidId(data.packId)
+        && data.itemOrder is number && data.itemOrder >= 1 && data.itemOrder <= 9999
+        && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
+        && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
+        && data.kind in ['worksheet', 'activity']
+        && data.isFreeSample is bool
+        && data.contentText is string && data.contentText.size() <= 25000
+        && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
         && data.createdAt is timestamp;
     }
 
@@ -224,6 +274,43 @@ service cloud.firestore {
         && incoming().authorUid == existing().authorUid
         && incoming().createdAt == existing().createdAt;
       allow delete: if isValidId(resourceId) && isAdmin();
+    }
+
+    match /worksheet_packs/{packId} {
+      allow get: if isValidId(packId);
+      allow list: if true;
+      allow create: if isValidId(packId) && isAdmin() && isValidWorksheetPack(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(packId) && isAdmin() && isValidWorksheetPack(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'packNumber', 'levelId', 'track', 'titleEn', 'titleAr',
+          'descriptionEn', 'descriptionAr', 'isPaid', 'priceEgp', 'allowWhiteLabel'
+        ]);
+      allow delete: if isValidId(packId) && isAdmin();
+    }
+
+    match /worksheet_items/{itemId} {
+      allow get: if isValidId(itemId);
+      allow list: if true;
+      allow create: if isValidId(itemId) && isAdmin() && isValidWorksheetPackItem(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (
+          exists(/databases/$(database)/documents/worksheet_packs/$(incoming().packId)) ||
+          existsAfter(/databases/$(database)/documents/worksheet_packs/$(incoming().packId))
+        );
+      allow update: if isValidId(itemId) && isAdmin() && isValidWorksheetPackItem(incoming())
+        && incoming().packId == existing().packId
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'itemOrder', 'titleEn', 'titleAr', 'kind', 'isFreeSample',
+          'contentText', 'fileName', 'fileDataUrl'
+        ]);
+      allow delete: if isValidId(itemId) && isAdmin();
     }
 
     match /stories/{storyId} {
@@ -291,6 +378,94 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
       allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    match /affiliate_courses/{courseId} {
+      allow get: if isValidId(courseId);
+      allow list: if true;
+      allow create: if isValidId(courseId) && isAdmin() && isValidAffiliateCourse(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(courseId) && isAdmin() && isValidAffiliateCourse(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'titleEn', 'titleAr', 'provider', 'track',
+          'descriptionEn', 'descriptionAr', 'durationLabel', 'affiliateUrl'
+        ]);
+      allow delete: if isValidId(courseId) && isAdmin();
+    }
+
+    match /question_bank/{questionId} {
+      allow get: if isValidId(questionId);
+      allow list: if true;
+      allow create: if isValidId(questionId) && isAdmin() && isValidQuestionBankItem(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(questionId) && isAdmin() && isValidQuestionBankItem(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'gradeId', 'unitLabel', 'prompt', 'options', 'correctIndex', 'explanation'
+        ]);
+      allow delete: if isValidId(questionId) && isAdmin();
+    }
+
+    match /teacher_subscriptions/{uid} {
+      allow get: if isValidId(uid) && isVerifiedUser() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isAdmin() && isValidTeacherSubscription(incoming())
+        && incoming().ownerUid == uid
+        && incoming().activatedByUid == request.auth.uid
+        && incoming().activatedAt == request.time;
+      allow update: if isValidId(uid) && isAdmin() && isValidTeacherSubscription(incoming())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().activatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'teacherName', 'teacherEmail', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
+        ]);
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /teacher_quizzes/{quizId} {
+      allow get: if isValidId(quizId) && (
+        existing().isPublished == true ||
+        (isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin()))
+      );
+      allow list: if isVerifiedUser() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(quizId) && isVerifiedUser() && isValidTeacherQuiz(incoming())
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (
+          (incoming().isTrial == true && quizId == ('trial_' + request.auth.uid)) ||
+          isAdmin() ||
+          (
+            exists(/databases/$(database)/documents/teacher_subscriptions/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/teacher_subscriptions/$(request.auth.uid)).data.active == true
+          )
+        );
+      allow update: if isValidId(quizId) && isVerifiedUser() && isValidTeacherQuiz(incoming())
+        && (existing().ownerUid == request.auth.uid || isAdmin())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().isTrial == existing().isTrial
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'gradeLabel', 'teacherName', 'schoolOrCenter',
+          'isPublished', 'timeLimitMinutes', 'questions'
+        ]);
+      allow delete: if isValidId(quizId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /quiz_attempts/{attemptId} {
+      allow get: if isValidId(attemptId) && isVerifiedUser() && (existing().quizOwnerUid == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.quizOwnerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(attemptId) && isValidQuizAttempt(incoming())
+        && incoming().submittedAt == request.time
+        && exists(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId))
+        && get(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId)).data.ownerUid == incoming().quizOwnerUid
+        && get(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId)).data.isPublished == true;
+      allow update: if false;
+      allow delete: if isValidId(attemptId) && isVerifiedUser() && (existing().quizOwnerUid == request.auth.uid || isAdmin());
     }
 
     match /admins/{uid} {

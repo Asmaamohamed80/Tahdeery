@@ -13,6 +13,8 @@ interface QuizQuestion {
 interface InteractiveQuizModalProps {
   resource: GradeResource | null;
   lang: Lang;
+  academyName?: string;
+  logoDataUrl?: string;
   onClose: () => void;
   onBuyFull: (resource: GradeResource) => void;
 }
@@ -20,6 +22,8 @@ interface InteractiveQuizModalProps {
 export function InteractiveQuizModal({
   resource,
   lang,
+  academyName,
+  logoDataUrl,
   onClose,
   onBuyFull,
 }: InteractiveQuizModalProps) {
@@ -64,7 +68,20 @@ export function InteractiveQuizModal({
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="space-y-1.5">
+            {(logoDataUrl || academyName) && (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                {logoDataUrl && (
+                  <img
+                    src={logoDataUrl}
+                    alt={academyName || ''}
+                    referrerPolicy="no-referrer"
+                    className="h-6 w-auto max-w-[80px] object-contain rounded"
+                  />
+                )}
+                {academyName && <span className="font-semibold text-sky-900">{academyName}</span>}
+              </div>
+            )}
             <p className="text-xs font-semibold text-sky-900">
               {lang === 'ar' ? 'معاينة النشاط التفاعلي' : 'Interactive Activity Sandbox'}
             </p>
