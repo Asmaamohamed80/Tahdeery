@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 interface Req {
   method?: string;
@@ -15,6 +15,31 @@ interface ExtractedQuestion {
   options: string[];
   correctIndex: number;
   explanation?: string;
+}
+
+function formatFriendlyAiError(err: unknown): { status: number; message: string } {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  if (raw.includes('503') || raw.includes('UNAVAILABLE') || raw.includes('high demand')) {
+    return {
+      status: 503,
+      message:
+        'الذكاء الاصطناعي عليه ضغط مؤقت الآن، يرجى المحاولة مرة أخرى بعد لحظات (أو تقسيم الأسئلة في الخانة النصية).',
+    };
+  }
+  if (raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED')) {
+    return {
+      status: 429,
+      message: 'تم تجاوز حد الطلبات المؤقت، يرجى الانتظار دقيقة ثم المحاولة مرة أخرى.',
+    };
+  }
+  if (raw.includes('400') || raw.includes('INVALID_ARGUMENT')) {
+    return {
+      status: 400,
+      message:
+        'تعذر قراءة هذا الملف مباشرة (قد يكون حجمه أو عدد صفحاته كبيراً). انسخي منه ٢٠–٣٠ سؤالاً والصقيهم في المربع بالأسفل.',
+    };
+  }
+  return { status: 500, message: raw || 'Failed to extract questions from PDF/text.' };
 }
 
 export default async function handler(req: Req, res: Res) {
@@ -76,36 +101,56 @@ Rules:
 5. Provide a short 1-sentence explanation for why the answer is correct.${rawText.trim() ? `\n\nSource text:\n${rawText.slice(0, 30000)}` : ''}`,
     });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: { parts },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            questions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  unitLabel: { type: Type.STRING },
-                  prompt: { type: Type.STRING },
-                  options: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                  },
-                  correctIndex: { type: Type.INTEGER },
-                  explanation: { type: Type.STRING },
-                },
-                required: ['unitLabel', 'prompt', 'options', 'correctIndex'],
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        questions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              unitLabel: { type: Type.STRING },
+              prompt: { type: Type.STRING },
+              options: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
               },
+              correctIndex: { type: Type.INTEGER },
+              explanation: { type: Type.STRING },
             },
+            required: ['unitLabel', 'prompt', 'options', 'correctIndex'],
           },
-          required: ['questions'],
         },
       },
-    });
+      required: ['questions'],
+    };
+
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: { parts },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema,
+        },
+      });
+    } catch (primaryErr) {
+      const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand')) {
+        response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: { parts },
+          config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        });
+      } else {
+        throw primaryErr;
+      }
+    }
 
     const parsed = JSON.parse((response.text ?? '{"questions":[]}').trim()) as {
       questions?: ExtractedQuestion[];
@@ -139,8 +184,7 @@ Rules:
     return res.status(200).json({ questions: sanitized });
   } catch (error) {
     console.error('Vercel AI extract-questions error:', error);
-    return res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to extract questions from PDF/text.',
-    });
+    const friendly = formatFriendlyAiError(error);
+    return res.status(friendly.status).json({ error: friendly.message });
   }
 }

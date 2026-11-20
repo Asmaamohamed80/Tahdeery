@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -357,36 +357,56 @@ Rules:
 5. Provide a short 1-sentence explanation for why the answer is correct.${cleanRawText.trim() ? `\n\nSource text:\n${cleanRawText.slice(0, 30000)}` : ''}`,
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: { parts },
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              questions: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    unitLabel: { type: Type.STRING },
-                    prompt: { type: Type.STRING },
-                    options: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                    },
-                    correctIndex: { type: Type.INTEGER },
-                    explanation: { type: Type.STRING },
-                  },
-                  required: ['unitLabel', 'prompt', 'options', 'correctIndex'],
+      const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          questions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                unitLabel: { type: Type.STRING },
+                prompt: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
                 },
+                correctIndex: { type: Type.INTEGER },
+                explanation: { type: Type.STRING },
               },
+              required: ['unitLabel', 'prompt', 'options', 'correctIndex'],
             },
-            required: ['questions'],
           },
         },
-      });
+        required: ['questions'],
+      };
+
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: { parts },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        });
+      } catch (primaryErr) {
+        const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+        if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand')) {
+          response = await ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
+            contents: { parts },
+            config: {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              responseMimeType: 'application/json',
+              responseSchema,
+            },
+          });
+        } else {
+          throw primaryErr;
+        }
+      }
 
       const parsed = JSON.parse((response.text ?? '{"questions":[]}').trim()) as {
         questions?: Array<{
@@ -424,8 +444,21 @@ Rules:
       return res.json({ questions: sanitized });
     } catch (error) {
       console.error('AI extract-questions error:', error);
+      const raw = error instanceof Error ? error.message : String(error || '');
+      if (raw.includes('503') || raw.includes('UNAVAILABLE') || raw.includes('high demand')) {
+        return res.status(503).json({
+          error:
+            'الذكاء الاصطناعي عليه ضغط مؤقت الآن، يرجى المحاولة مرة أخرى بعد لحظات (أو لصق الأسئلة نصياً).',
+        });
+      }
+      if (raw.includes('400') || raw.includes('INVALID_ARGUMENT')) {
+        return res.status(400).json({
+          error:
+            'تعذر قراءة هذا الملف مباشرة (قد يكون حجمه أو عدد صفحاته كبيراً). انسخي منه ٢٠–٣٠ سؤالاً والصقيهم في المربع بالأسفل.',
+        });
+      }
       return res.status(500).json({
-        error: error instanceof Error ? error.message : 'Failed to extract questions from PDF/text.',
+        error: raw || 'Failed to extract questions from PDF/text.',
       });
     }
   });
