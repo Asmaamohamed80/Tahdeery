@@ -38,6 +38,7 @@ export interface WorksheetPackItem {
   contentText: string;
   fileName?: string;
   fileDataUrl?: string;
+  externalUrl?: string;
   authorUid: string;
   createdAt?: unknown;
 }
@@ -154,6 +155,7 @@ export interface GradeResource {
   contentText: string;
   fileName?: string;
   fileDataUrl?: string;
+  externalUrl?: string;
   authorUid: string;
   createdAt?: unknown;
 }
@@ -171,6 +173,7 @@ export interface StoryItem {
   priceEgp: number;
   fileName?: string;
   fileDataUrl?: string;
+  externalUrl?: string;
   authorUid: string;
   createdAt?: unknown;
 }
@@ -186,6 +189,7 @@ export interface OfficialPaper {
   contentText: string;
   fileName?: string;
   fileDataUrl?: string;
+  externalUrl?: string;
   isPaid: boolean;
   priceEgp: number;
   authorUid: string;

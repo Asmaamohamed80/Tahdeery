@@ -1,13 +1,30 @@
+export function normalizeExternalDownloadUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed.startsWith('https://')) return trimmed;
+
+  // Convert standard Google Drive share links (/file/d/<ID>/view or ?id=<ID>) into direct download links
+  const filePathMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (filePathMatch?.[1]) {
+    return `https://drive.google.com/uc?export=download&id=${filePathMatch[1]}`;
+  }
+  const queryIdMatch = trimmed.match(/drive\.google\.com\/(?:open|uc)\?(?:.*&)?id=([a-zA-Z0-9_-]+)/);
+  if (queryIdMatch?.[1]) {
+    return `https://drive.google.com/uc?export=download&id=${queryIdMatch[1]}`;
+  }
+  return trimmed;
+}
+
 export function downloadTextOrHtmlFile(options: {
   fileName: string;
   title: string;
   subtitle?: string;
   bodyText: string;
   fileDataUrl?: string;
+  externalUrl?: string;
   brandHeader?: string;
   logoDataUrl?: string;
 }) {
-  const { fileName, title, subtitle, bodyText, fileDataUrl, brandHeader, logoDataUrl } = options;
+  const { fileName, title, subtitle, bodyText, fileDataUrl, externalUrl, brandHeader, logoDataUrl } = options;
 
   const triggerDownload = (href: string, name: string) => {
     const link = document.createElement('a');
@@ -17,6 +34,17 @@ export function downloadTextOrHtmlFile(options: {
     link.click();
     document.body.removeChild(link);
   };
+
+  if (externalUrl && externalUrl.trim().startsWith('https://')) {
+    const link = document.createElement('a');
+    link.href = normalizeExternalDownloadUrl(externalUrl);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return;
+  }
 
   if (fileDataUrl && fileDataUrl.startsWith('data:')) {
     // If it's an image file and a site logo is configured, prepend a crisp top brand strip

@@ -67,7 +67,7 @@ service cloud.firestore {
           'gradeId', 'category', 'titleEn', 'titleAr',
           'descriptionEn', 'descriptionAr', 'isInteractive',
           'isPaid', 'priceEgp', 'allowWhiteLabel', 'contentText',
-          'fileName', 'fileDataUrl', 'authorUid', 'createdAt'
+          'fileName', 'fileDataUrl', 'externalUrl', 'authorUid', 'createdAt'
         ])
         && data.gradeId is string && data.gradeId.size() >= 2 && data.gradeId.size() <= 32
         && data.category in ['prep', 'exam', 'worksheet', 'activity']
@@ -81,7 +81,8 @@ service cloud.firestore {
         && data.allowWhiteLabel is bool
         && data.contentText is string && data.contentText.size() <= 25000
         && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
-        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 920000))
+        && (!data.keys().hasAny(['externalUrl']) || (data.externalUrl is string && data.externalUrl.size() >= 8 && data.externalUrl.size() <= 500 && data.externalUrl.matches('^https://.*')))
         && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
         && data.createdAt is timestamp;
     }
@@ -94,7 +95,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'titleEn', 'titleAr', 'levelLabel', 'summaryEn', 'summaryAr',
           'previewExcerpt', 'coverUrl', 'isPaid', 'priceEgp', 'fileName',
-          'fileDataUrl', 'authorUid', 'createdAt'
+          'fileDataUrl', 'externalUrl', 'authorUid', 'createdAt'
         ])
         && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
         && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 160
@@ -106,7 +107,8 @@ service cloud.firestore {
         && data.isPaid is bool
         && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
         && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
-        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 920000))
+        && (!data.keys().hasAny(['externalUrl']) || (data.externalUrl is string && data.externalUrl.size() >= 8 && data.externalUrl.size() <= 500 && data.externalUrl.matches('^https://.*')))
         && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
         && data.createdAt is timestamp;
     }
@@ -120,7 +122,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
           'descriptionEn', 'descriptionAr', 'contentText',
-          'fileName', 'fileDataUrl', 'isPaid', 'priceEgp',
+          'fileName', 'fileDataUrl', 'externalUrl', 'isPaid', 'priceEgp',
           'authorUid', 'createdAt'
         ])
         && data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 160
@@ -131,7 +133,8 @@ service cloud.firestore {
         && data.descriptionAr is string && data.descriptionAr.size() <= 1000
         && data.contentText is string && data.contentText.size() <= 20000
         && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
-        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 920000))
+        && (!data.keys().hasAny(['externalUrl']) || (data.externalUrl is string && data.externalUrl.size() >= 8 && data.externalUrl.size() <= 500 && data.externalUrl.matches('^https://.*')))
         && data.isPaid is bool
         && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
         && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
@@ -240,7 +243,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'packId', 'itemOrder', 'titleEn', 'titleAr',
-          'kind', 'isFreeSample', 'contentText', 'fileName', 'fileDataUrl',
+          'kind', 'isFreeSample', 'contentText', 'fileName', 'fileDataUrl', 'externalUrl',
           'authorUid', 'createdAt'
         ])
         && isValidId(data.packId)
@@ -251,7 +254,8 @@ service cloud.firestore {
         && data.isFreeSample is bool
         && data.contentText is string && data.contentText.size() <= 25000
         && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
-        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 600000))
+        && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 920000))
+        && (!data.keys().hasAny(['externalUrl']) || (data.externalUrl is string && data.externalUrl.size() >= 8 && data.externalUrl.size() <= 500 && data.externalUrl.matches('^https://.*')))
         && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
         && data.createdAt is timestamp;
     }
@@ -383,7 +387,7 @@ service cloud.firestore {
           'gradeId', 'category', 'titleEn', 'titleAr',
           'descriptionEn', 'descriptionAr', 'isInteractive',
           'isPaid', 'priceEgp', 'allowWhiteLabel', 'contentText',
-          'fileName', 'fileDataUrl'
+          'fileName', 'fileDataUrl', 'externalUrl'
         ]);
       allow delete: if isValidId(resourceId) && isAdmin();
     }
@@ -420,7 +424,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'itemOrder', 'titleEn', 'titleAr', 'kind', 'isFreeSample',
-          'contentText', 'fileName', 'fileDataUrl'
+          'contentText', 'fileName', 'fileDataUrl', 'externalUrl'
         ]);
       allow delete: if isValidId(itemId) && isAdmin();
     }
@@ -436,7 +440,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'titleEn', 'titleAr', 'levelLabel', 'summaryEn', 'summaryAr',
-          'previewExcerpt', 'coverUrl', 'isPaid', 'priceEgp', 'fileName', 'fileDataUrl'
+          'previewExcerpt', 'coverUrl', 'isPaid', 'priceEgp', 'fileName', 'fileDataUrl', 'externalUrl'
         ]);
       allow delete: if isValidId(storyId) && isAdmin();
     }
@@ -453,7 +457,7 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
           'descriptionEn', 'descriptionAr', 'contentText',
-          'fileName', 'fileDataUrl', 'isPaid', 'priceEgp'
+          'fileName', 'fileDataUrl', 'externalUrl', 'isPaid', 'priceEgp'
         ]);
       allow delete: if isValidId(paperId) && isAdmin();
     }

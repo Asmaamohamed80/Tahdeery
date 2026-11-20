@@ -133,6 +133,7 @@ export function AdminDashboardModal({
   const [resContent, setResContent] = useState('');
   const [resFileName, setResFileName] = useState('');
   const [resFileDataUrl, setResFileDataUrl] = useState('');
+  const [resExternalUrl, setResExternalUrl] = useState('');
 
   // Story form state
   const [stTitleEn, setStTitleEn] = useState('');
@@ -145,6 +146,7 @@ export function AdminDashboardModal({
   const [stPrice, setStPrice] = useState(65);
   const [stFileName, setStFileName] = useState('');
   const [stFileDataUrl, setStFileDataUrl] = useState('');
+  const [stExternalUrl, setStExternalUrl] = useState('');
 
   // Official paper form state
   const [opTitleEn, setOpTitleEn] = useState('');
@@ -156,6 +158,7 @@ export function AdminDashboardModal({
   const [opContent, setOpContent] = useState('');
   const [opFileName, setOpFileName] = useState('');
   const [opFileDataUrl, setOpFileDataUrl] = useState('');
+  const [opExternalUrl, setOpExternalUrl] = useState('');
 
   // News form state
   const [nwTitleEn, setNwTitleEn] = useState('');
@@ -234,6 +237,7 @@ export function AdminDashboardModal({
   const [sheetTitleEn, setSheetTitleEn] = useState('');
   const [sheetContent, setSheetContent] = useState('');
   const [sheetIsSample, setSheetIsSample] = useState(true);
+  const [sheetExternalUrl, setSheetExternalUrl] = useState('');
   const [bulkFiles, setBulkFiles] = useState<{ name: string; dataUrl: string }[]>([]);
 
   useEffect(() => {
@@ -259,16 +263,32 @@ export function AdminDashboardModal({
 
   if (!open) return null;
 
+  const MAX_DIRECT_FILE_BYTES = 650 * 1024;
+
+  const validateHttpsExternalUrl = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    if (!trimmed.startsWith('https://') || trimmed.length < 8 || trimmed.length > 500) {
+      setFeedback(
+        lang === 'ar'
+          ? 'رابط Google Drive أو الملف الخارجي يجب أن يبدأ بـ https:// وألا يتعدى 500 حرف.'
+          : 'External link must start with https:// and be under 500 characters.'
+      );
+      return null;
+    }
+    return trimmed;
+  };
+
   const handleFileRead = (
     file: File | undefined,
     onDone: (name: string, dataUrl: string) => void
   ) => {
     if (!file) return;
-    if (file.size > 400 * 1024) {
+    if (file.size > MAX_DIRECT_FILE_BYTES) {
       setFeedback(
         lang === 'ar'
-          ? 'حجم الملف يجب أن يكون أقل من 400 كيلوبايت للحفظ المباشر في قاعدة البيانات.'
-          : 'File must be under 400KB for direct Firestore storage.'
+          ? 'حجم الملف أكبر من 650 كيلوبايت (حد الرفع المباشر). ارفعيه على Google Drive وضعي رابطه في الخانة أسفل الزر ليظهر للمدرسين بشكل عادي!'
+          : 'File exceeds 650KB direct-storage limit. Upload it to Google Drive and paste the share link below!'
       );
       return;
     }
@@ -330,6 +350,8 @@ export function AdminDashboardModal({
   const handleAddResource = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const validExternal = validateHttpsExternalUrl(resExternalUrl);
+    if (validExternal === null) return;
     setBusy(true);
     setFeedback('');
     try {
@@ -346,7 +368,8 @@ export function AdminDashboardModal({
         allowWhiteLabel: resAllowWhiteLabel,
         contentText: (resContent || resDescEn || resDescAr || 'English Resource Content').slice(0, 25000),
         ...(resFileName ? { fileName: resFileName.slice(0, 180) } : {}),
-        ...(resFileDataUrl ? { fileDataUrl: resFileDataUrl.slice(0, 600000) } : {}),
+        ...(resFileDataUrl ? { fileDataUrl: resFileDataUrl.slice(0, 920000) } : {}),
+        ...(validExternal ? { externalUrl: validExternal } : {}),
         authorUid: user.uid,
         createdAt: serverTimestamp(),
       });
@@ -357,6 +380,7 @@ export function AdminDashboardModal({
       setResContent('');
       setResFileName('');
       setResFileDataUrl('');
+      setResExternalUrl('');
       setFeedback(lang === 'ar' ? 'تمت إضافة العنصر بنجاح!' : 'Resource added successfully!');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'grades_resources');
@@ -386,7 +410,7 @@ export function AdminDashboardModal({
       Array.from(files).map(
         (file) =>
           new Promise<void>((resolve) => {
-            if (file.size > 400 * 1024) {
+            if (file.size > MAX_DIRECT_FILE_BYTES) {
               oversized.push(file.name);
               resolve();
               return;
@@ -406,8 +430,8 @@ export function AdminDashboardModal({
     if (oversized.length > 0) {
       setFeedback(
         lang === 'ar'
-          ? `تم استبعاد ${oversized.length} ملف لأن حجمه أكبر من 400 كيلوبايت.`
-          : `Skipped ${oversized.length} file(s) over 400KB limit.`
+          ? `تم استبعاد ${oversized.length} ملف لأن حجمه أكبر من 650 كيلوبايت (يمكنك ربطه برابط Google Drive بالأسفل).`
+          : `Skipped ${oversized.length} file(s) over 650KB limit (you can paste a Google Drive link below).`
       );
     } else if (loaded.length > 0) {
       setFeedback(
@@ -454,6 +478,8 @@ export function AdminDashboardModal({
   const handleAddSheetsToPack = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !targetPackId) return;
+    const validExternal = validateHttpsExternalUrl(sheetExternalUrl);
+    if (validExternal === null) return;
     setBusy(true);
     setFeedback('');
     try {
@@ -486,7 +512,7 @@ export function AdminDashboardModal({
             isFreeSample: sheetIsSample,
             contentText: (sheetContent || baseTitleEn).slice(0, 25000),
             fileName: f.name.slice(0, 180),
-            fileDataUrl: f.dataUrl.slice(0, 600000),
+            fileDataUrl: f.dataUrl.slice(0, 920000),
             authorUid: user.uid,
             createdAt: serverTimestamp(),
           });
@@ -501,6 +527,7 @@ export function AdminDashboardModal({
           kind: sheetKind,
           isFreeSample: sheetIsSample,
           contentText: (sheetContent || sheetTitleAr || sheetTitleEn || 'Worksheet').slice(0, 25000),
+          ...(validExternal ? { externalUrl: validExternal } : {}),
           authorUid: user.uid,
           createdAt: serverTimestamp(),
         });
@@ -510,6 +537,7 @@ export function AdminDashboardModal({
       setSheetTitleAr('');
       setSheetTitleEn('');
       setSheetContent('');
+      setSheetExternalUrl('');
       setBulkFiles([]);
       setFeedback(
         lang === 'ar'
@@ -543,6 +571,8 @@ export function AdminDashboardModal({
   const handleAddStory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const validExternal = validateHttpsExternalUrl(stExternalUrl);
+    if (validExternal === null) return;
     setBusy(true);
     try {
       await addDoc(collection(db, 'stories'), {
@@ -556,7 +586,8 @@ export function AdminDashboardModal({
         isPaid: true,
         priceEgp: Number(stPrice) || 50,
         ...(stFileName ? { fileName: stFileName.slice(0, 180) } : {}),
-        ...(stFileDataUrl ? { fileDataUrl: stFileDataUrl.slice(0, 600000) } : {}),
+        ...(stFileDataUrl ? { fileDataUrl: stFileDataUrl.slice(0, 920000) } : {}),
+        ...(validExternal ? { externalUrl: validExternal } : {}),
         authorUid: user.uid,
         createdAt: serverTimestamp(),
       });
@@ -567,6 +598,7 @@ export function AdminDashboardModal({
       setStPreview('');
       setStFileName('');
       setStFileDataUrl('');
+      setStExternalUrl('');
       setFeedback(lang === 'ar' ? 'تمت إضافة القصة بنجاح!' : 'Story added!');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'stories');
@@ -578,6 +610,8 @@ export function AdminDashboardModal({
   const handleAddPaper = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const validExternal = validateHttpsExternalUrl(opExternalUrl);
+    if (validExternal === null) return;
     setBusy(true);
     try {
       await addDoc(collection(db, 'official_papers'), {
@@ -589,7 +623,8 @@ export function AdminDashboardModal({
         descriptionAr: (opDescAr || opDescEn).slice(0, 1000),
         contentText: (opContent || opDescEn || opDescAr || 'Official School Template').slice(0, 20000),
         ...(opFileName ? { fileName: opFileName.slice(0, 180) } : {}),
-        ...(opFileDataUrl ? { fileDataUrl: opFileDataUrl.slice(0, 600000) } : {}),
+        ...(opFileDataUrl ? { fileDataUrl: opFileDataUrl.slice(0, 920000) } : {}),
+        ...(validExternal ? { externalUrl: validExternal } : {}),
         isPaid: false,
         priceEgp: 0,
         authorUid: user.uid,
@@ -602,6 +637,7 @@ export function AdminDashboardModal({
       setOpContent('');
       setOpFileName('');
       setOpFileDataUrl('');
+      setOpExternalUrl('');
       setFeedback(lang === 'ar' ? 'تمت إضافة الورقة الرسمية بنجاح!' : 'Official paper added!');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'official_papers');
@@ -1263,7 +1299,7 @@ export function AdminDashboardModal({
                   <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer">
                     <Upload className="w-3.5 h-3.5 text-slate-500" />
                     <span className="truncate">
-                      {resFileName || (lang === 'ar' ? 'إرفاق ملف للتحميل (اختياري)' : 'Attach file (optional)')}
+                      {resFileName || (lang === 'ar' ? 'إرفاق ملف مباشر (حتى 650 كيلوبايت)' : 'Attach direct file (up to 650KB)')}
                     </span>
                     <input
                       type="file"
@@ -1276,6 +1312,25 @@ export function AdminDashboardModal({
                       }
                     />
                   </label>
+                  <div className="space-y-1">
+                    <input
+                      type="url"
+                      dir="ltr"
+                      placeholder={
+                        lang === 'ar'
+                          ? 'أو رابط Google Drive للملفات الكبيرة (https://drive.google.com/...)'
+                          : 'Or Google Drive link for large PDFs (https://drive.google.com/...)'
+                      }
+                      value={resExternalUrl}
+                      onChange={(e) => setResExternalUrl(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono-num"
+                    />
+                    <p className="text-[11px] text-slate-500">
+                      {lang === 'ar'
+                        ? 'للملفات الأكبر من 650 كيلوبايت: ارفعيها على Google Drive (مشاركة: أي شخص لديه الرابط) وضعي الرابط هنا ليحمّله المدرسون بشكل عادي.'
+                        : 'For files over 650KB: upload to Google Drive (Anyone with the link) and paste the link here.'}
+                    </p>
+                  </div>
                   <button
                     type="submit"
                     disabled={busy}
@@ -1523,8 +1578,8 @@ export function AdminDashboardModal({
                               ? `تم اختيار ${bulkFiles.length} ملف للرفع معاً`
                               : `${bulkFiles.length} file(s) ready`
                             : lang === 'ar'
-                            ? 'اختر ملف واحد أو عدة ملفات معاً (صور / PDF / HTML)'
-                            : 'Select 1 or multiple files (Images / PDF / HTML)'}
+                            ? 'اختر ملف واحد أو عدة ملفات معاً (حتى 650 كيلوبايت للملف)'
+                            : 'Select 1 or multiple files (up to 650KB each)'}
                         </span>
                         <input
                           type="file"
@@ -1533,6 +1588,20 @@ export function AdminDashboardModal({
                           onChange={(e) => handleBulkFilesRead(e.target.files)}
                         />
                       </label>
+                      {bulkFiles.length === 0 && (
+                        <input
+                          type="url"
+                          dir="ltr"
+                          placeholder={
+                            lang === 'ar'
+                              ? 'أو رابط Google Drive لملف كبير (https://drive.google.com/...)'
+                              : 'Or Google Drive link for a large file (https://...)'
+                          }
+                          value={sheetExternalUrl}
+                          onChange={(e) => setSheetExternalUrl(e.target.value)}
+                          className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono-num"
+                        />
+                      )}
                       <button
                         type="submit"
                         disabled={busy || !targetPackId}
@@ -1682,7 +1751,7 @@ export function AdminDashboardModal({
                   />
                   <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer">
                     <Upload className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="truncate">{stFileName || (lang === 'ar' ? 'رفع ملف القصة' : 'Attach story file')}</span>
+                    <span className="truncate">{stFileName || (lang === 'ar' ? 'رفع ملف القصة (حتى 650 كيلوبايت)' : 'Attach story file (up to 650KB)')}</span>
                     <input
                       type="file"
                       className="hidden"
@@ -1694,6 +1763,18 @@ export function AdminDashboardModal({
                       }
                     />
                   </label>
+                  <input
+                    type="url"
+                    dir="ltr"
+                    placeholder={
+                      lang === 'ar'
+                        ? 'أو رابط Google Drive للقصة (https://drive.google.com/...)'
+                        : 'Or Google Drive link for story PDF (https://...)'
+                    }
+                    value={stExternalUrl}
+                    onChange={(e) => setStExternalUrl(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono-num"
+                  />
                   <button
                     type="submit"
                     disabled={busy}
@@ -1778,7 +1859,7 @@ export function AdminDashboardModal({
                   />
                   <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer">
                     <Upload className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="truncate">{opFileName || (lang === 'ar' ? 'رفع ملف (اختياري)' : 'Attach file (optional)')}</span>
+                    <span className="truncate">{opFileName || (lang === 'ar' ? 'رفع ملف (حتى 650 كيلوبايت)' : 'Attach file (up to 650KB)')}</span>
                     <input
                       type="file"
                       className="hidden"
@@ -1790,6 +1871,18 @@ export function AdminDashboardModal({
                       }
                     />
                   </label>
+                  <input
+                    type="url"
+                    dir="ltr"
+                    placeholder={
+                      lang === 'ar'
+                        ? 'أو رابط Google Drive للملفات الكبيرة (https://drive.google.com/...)'
+                        : 'Or Google Drive link for large files (https://...)'
+                    }
+                    value={opExternalUrl}
+                    onChange={(e) => setOpExternalUrl(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono-num"
+                  />
                   <button
                     type="submit"
                     disabled={busy}

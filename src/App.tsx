@@ -941,6 +941,7 @@ export default function App() {
                                 subtitle: `${lang === 'ar' ? gradeMeta?.nameAr : gradeMeta?.nameEn} · ${categoryText}`,
                                 bodyText: item.contentText,
                                 fileDataUrl: item.fileDataUrl,
+                                externalUrl: item.externalUrl,
                                 brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
                                 logoDataUrl: settings.logoDataUrl,
                               })
@@ -1213,6 +1214,7 @@ export default function App() {
                           subtitle: lang === 'ar' ? paper.categoryAr : paper.categoryEn,
                           bodyText: paper.contentText,
                           fileDataUrl: paper.fileDataUrl,
+                          externalUrl: paper.externalUrl,
                           brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
                           logoDataUrl: settings.logoDataUrl,
                         })

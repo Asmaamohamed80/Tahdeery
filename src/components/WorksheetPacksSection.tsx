@@ -351,6 +351,7 @@ export function WorksheetPacksSection({
                               subtitle: `${labels.packNumberPrefix} ${activePack.packNumber} · ${getLevelLabel(activePack.levelId)}`,
                               bodyText: sheet.contentText,
                               fileDataUrl: sheet.fileDataUrl,
+                              externalUrl: sheet.externalUrl,
                               brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
                               logoDataUrl: settings.logoDataUrl,
                             })
