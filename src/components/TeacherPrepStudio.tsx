@@ -206,7 +206,7 @@ ${homework}`;
             type="button"
             disabled={draftingAi}
             onClick={handleAiDraft}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold text-sky-900 bg-white border border-sky-200 rounded-xl hover:bg-sky-50 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 transition-colors whitespace-nowrap shrink-0"
           >
             <Sparkles className="w-4 h-4" />
             <span>{draftingAi ? labels.generating : labels.aiDraftBtn}</span>
@@ -216,7 +216,7 @@ ${homework}`;
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <form
             onSubmit={handleSaveAndShare}
-            className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5"
+            className="lg:col-span-8 bg-slate-50 border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5"
           >
             {settings?.logoDataUrl && (
               <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
@@ -435,7 +435,7 @@ ${homework}`;
               </div>
             )}
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
               <h3 className="text-base font-bold text-slate-900">
                 {lang === 'ar' ? 'تحضيراتك المنشورة' : 'Your Published Lesson Preps'}
               </h3>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, LogOut, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Check, Download, Link2, LogOut, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import {
   addDoc,
   collection,
@@ -46,6 +46,7 @@ export type AdminTab =
   | 'stories'
   | 'papers'
   | 'news'
+  | 'links'
   | 'settings'
   | 'orders';
 
@@ -112,6 +113,7 @@ export function AdminDashboardModal({
   const [tab, setTab] = useState<AdminTab>(initialTab);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [copiedKey, setCopiedKey] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -1111,6 +1113,7 @@ export function AdminDashboardModal({
                     ['stories', lang === 'ar' ? 'القصص' : 'Stories'],
                     ['papers', lang === 'ar' ? 'الأوراق الرسمية' : 'Official Papers'],
                     ['news', lang === 'ar' ? 'الأخبار' : 'News'],
+                    ['links', lang === 'ar' ? 'روابط البوستات' : 'Post Links'],
                     ['settings', lang === 'ar' ? 'الإعدادات واللوجو والأسعار' : 'Logo, InstaPay & Pricing'],
                     ['orders', lang === 'ar' ? 'الطلبات' : 'Orders'],
                   ] as const
@@ -2306,8 +2309,8 @@ export function AdminDashboardModal({
                       </h3>
                       <p className="text-xs text-slate-600">
                         {lang === 'ar'
-                          ? 'ارفعي ملف الـ PDF (حتى 3 ميجا) أو الصقي نص الأسئلة، وسيستخرجها الذكاء الاصطناعي كاختيار من متعدد ويحفظها في البنك بضغطة واحدة.'
-                          : 'Upload a PDF (up to 3MB) or paste text to extract up to 30 MCQs straight into your Question Bank.'}
+                          ? 'ارفعي ملف الـ PDF (حتى 3 ميجا) أو الصقي نص الأسئلة، وسيستخرجها الذكاء الاصطناعي كاختيار من متعدد ويحفظها في البنك بضغطة واحدة. كل سؤال يضاف لأي صف يتحول تلقائياً لأسئلة تفاعلية للطلاب داخل قسم الصفوف والورق وداخل منصة الكويزات للمعلمين.'
+                          : 'Upload a PDF (up to 3MB) or paste text to extract up to 30 MCQs straight into your Question Bank. Every saved question automatically powers interactive student practice in the Grades Library and the Teacher Quiz Builder.'}
                       </p>
                     </div>
                   </div>
@@ -2707,6 +2710,182 @@ export function AdminDashboardModal({
                     </div>
                   ))
                 )}
+              </div>
+            )}
+
+            {tab === 'links' && (
+              <div className="space-y-4">
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 space-y-1">
+                  <h3 className="text-sm font-bold text-sky-950 flex items-center gap-2">
+                    <Link2 className="w-4 h-4 text-sky-800" />
+                    <span>
+                      {lang === 'ar'
+                        ? 'روابط مباشرة لأقسام المنصة (جاهزة للنسخ في بوستات فيسبوك وواتساب)'
+                        : 'Direct Deep Links for Social Media Posts'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-sky-900/80 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'أي زائر يضغط على الرابط يفتح له القسم المطلوب فوراً بدون ما يدور من أول الصفحة، ويقدر بعدها يتصفح باقي المنصة بكل سهولة.'
+                      : 'Visitors clicking these links jump straight to the target section without scrolling from the top, then explore the rest of the platform freely.'}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(
+                    [
+                      {
+                        key: 'stories',
+                        titleAr: 'قسم القصص الإنجليزية المصورة',
+                        titleEn: 'Illustrated English Stories',
+                        noteAr: 'مقتطف مجاني للقراءة + شراء النسخة الكاملة',
+                        noteEn: 'Free excerpt preview + full story unlock',
+                      },
+                      {
+                        key: 'iq-tests',
+                        titleAr: 'اختبارات الذكاء والشخصية والذاكرة (مجاني 100%)',
+                        titleEn: 'IQ, Psych & Visual Memory (100% Free)',
+                        noteAr: 'مجاني بالنتيجة الفورية + شهادة PDF باسم الطفل مجاناً',
+                        noteEn: 'Instant score + free printable PDF certificate',
+                      },
+                      {
+                        key: 'coding-game',
+                        titleAr: 'ألعاب تعليم البرمجة للأطفال (مجاني 100%)',
+                        titleEn: 'Kids English Coding Games (100% Free)',
+                        noteAr: 'لعبتان (ليو + مصنع If/Else) مع النتيجة وشهادة PDF مجاناً',
+                        noteEn: 'Robot Leo + LogicLab If/Else with free PDF certificate',
+                      },
+                      {
+                        key: 'english-games',
+                        titleAr: 'نادي ألعاب الإنجليزي التفاعلي للأطفال (مجاني 100%)',
+                        titleEn: 'Kids English Interactive Mini-Games (100% Free)',
+                        noteAr: '3 مستويات للسن · 4 ألعاب ممتدة + نطق ومايكروفون + شهادة PDF مجاناً',
+                        noteEn: '3 age tiers · 4 expanded mini-games + mic practice + free PDF certificate',
+                      },
+                      {
+                        key: 'decision-lab',
+                        titleAr: 'مختبر صنّاع القرار والمبدعين للأطفال (مجاني 100%)',
+                        titleEn: 'Decision Makers & Creators Lab (100% Free)',
+                        noteAr: '18 تحدياً في 3 أعمار · محاكاة قرار + غلطة الروبوت + مهام برا الشاشة بدون كهرباء',
+                        noteEn: '18 challenges · Decision Sim, Robot Bug Hunt & Safe Off-Screen Missions + PDF award',
+                      },
+                      {
+                        key: 'worksheet-library',
+                        titleAr: 'مكتبة حزم أوراق العمل المرقّمة',
+                        titleEn: 'Numbered Worksheet Packs',
+                        noteAr: 'من التأسيس والروضة حتى الثانوي — نماذج مجانية ومجموعات',
+                        noteEn: 'From early years to secondary — free samples & packs',
+                      },
+                      {
+                        key: 'grades',
+                        titleAr: 'المكتبة الدراسية حسب الصف (تحضير وامتحانات)',
+                        titleEn: 'Grade-Level Curriculum & Preps',
+                        noteAr: 'تحضير إلكتروني، امتحانات، وأوراق عمل مجانية ومدفوعة',
+                        noteEn: 'Electronic lesson preps, exams & worksheets',
+                      },
+                      {
+                        key: 'certificates',
+                        titleAr: 'استوديو شهادات التقدير بالذكاء الاصطناعي',
+                        titleEn: 'AI Appreciation Certificate Studio',
+                        noteAr: 'معاينة مجانية بصورة الطفل وتنسيق فوري',
+                        noteEn: 'Live student photo preview & AI wording',
+                      },
+                      {
+                        key: 'quiz-builder',
+                        titleAr: 'بنك الأسئلة ومنصة الكويزات للمعلمين',
+                        titleEn: 'Teacher Question Bank & Quiz Builder',
+                        noteAr: 'امتحان تجريبي مجاني للمعلمين والطلاب',
+                        noteEn: 'Instant quiz links + free trial quiz',
+                      },
+                      {
+                        key: 'teacher-studio',
+                        titleAr: 'استوديو تحضير المعلم والنشر على فيسبوك',
+                        titleEn: 'Teacher Prep Studio & Facebook Sharing',
+                        noteAr: 'صمّم تحضيرك الإلكتروني واحصل على رابط للمشاركة',
+                        noteEn: 'Write lesson preps with AI & share directly',
+                      },
+                      {
+                        key: 'courses',
+                        titleAr: 'أفضل كورسات تطوير مهارات معلمي الإنجليزية',
+                        titleEn: 'Teacher Professional Courses',
+                        noteAr: 'تصفح مجاني لأقوى الكورسات التدريبية',
+                        noteEn: 'Free curated directory for teachers',
+                      },
+                    ] as const
+                  ).map((item) => {
+                    const origin =
+                      typeof window !== 'undefined' && window.location.origin
+                        ? window.location.origin
+                        : 'https://tahdeery.vercel.app';
+                    const fullUrl = `${origin}/?go=${item.key}`;
+                    const isCopied = copiedKey === item.key;
+
+                    return (
+                      <div
+                        key={item.key}
+                        className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between gap-3"
+                      >
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-slate-900">
+                            {lang === 'ar' ? item.titleAr : item.titleEn}
+                          </h4>
+                          <p className="text-xs text-emerald-700 font-medium">
+                            {lang === 'ar' ? item.noteAr : item.noteEn}
+                          </p>
+                          <p
+                            dir="ltr"
+                            className="text-[11px] font-mono text-slate-600 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 truncate select-all"
+                          >
+                            {fullUrl}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(fullUrl);
+                              setCopiedKey(item.key);
+                              setTimeout(() => setCopiedKey(''), 2000);
+                            }}
+                            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                              isCopied
+                                ? 'bg-emerald-700 text-white'
+                                : 'bg-sky-900 text-white hover:bg-sky-800'
+                            }`}
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />}
+                            <span>
+                              {isCopied
+                                ? lang === 'ar'
+                                  ? 'تم نسخ الرابط!'
+                                  : 'Copied!'
+                                : lang === 'ar'
+                                ? 'نسخ رابط البوست'
+                                : 'Copy Link'}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              const target = document.getElementById(item.key);
+                              if (target) {
+                                window.scrollTo({
+                                  top: target.getBoundingClientRect().top + window.scrollY - 76,
+                                  behavior: 'smooth',
+                                });
+                              }
+                            }}
+                            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 whitespace-nowrap"
+                          >
+                            {lang === 'ar' ? 'انتقال' : 'Jump'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </>

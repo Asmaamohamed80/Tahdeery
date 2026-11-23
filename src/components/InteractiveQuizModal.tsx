@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react';
-import { CheckCircle2, Lock, RotateCcw, X, XCircle } from 'lucide-react';
-import type { GradeResource, Lang } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, Lock, RotateCcw, Volume2, X, XCircle } from 'lucide-react';
+import type { GradeResource, Lang, QuestionBankItem } from '../types';
 import { t } from '../i18n';
+import { speakEnglishText } from '../utils/englishSpeech';
 
 interface QuizQuestion {
   question: string;
   options: string[];
   correctIndex: number;
   explanation?: string;
+  unitLabel?: string;
 }
 
 interface InteractiveQuizModalProps {
@@ -15,6 +17,7 @@ interface InteractiveQuizModalProps {
   lang: Lang;
   academyName?: string;
   logoDataUrl?: string;
+  questionBank?: QuestionBankItem[];
   onClose: () => void;
   onBuyFull: (resource: GradeResource) => void;
 }
@@ -24,42 +27,79 @@ export function InteractiveQuizModal({
   lang,
   academyName,
   logoDataUrl,
+  questionBank = [],
   onClose,
   onBuyFull,
 }: InteractiveQuizModalProps) {
   const labels = t(lang);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
 
-  const questions: QuizQuestion[] = useMemo(() => {
-    if (!resource) return [];
+  useEffect(() => {
+    setSelectedAnswers({});
+  }, [resource?.id]);
+
+  const { questions, sourceMode } = useMemo<{
+    questions: QuizQuestion[];
+    sourceMode: 'json' | 'bank' | 'sample';
+  }>(() => {
+    if (!resource) return { questions: [], sourceMode: 'sample' };
+
     try {
       const parsed = JSON.parse(resource.contentText);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return {
+          questions: parsed.map((q) => ({
+            question: String(q.question || q.prompt || ''),
+            options: Array.isArray(q.options) ? q.options.map(String) : [],
+            correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
+            explanation: q.explanation ? String(q.explanation) : undefined,
+            unitLabel: q.unitLabel ? String(q.unitLabel) : undefined,
+          })),
+          sourceMode: 'json',
+        };
       }
     } catch {
-      // Fallback sample interactive questions if resource contentText is plain prose
+      // Fallback to grade Question Bank items if resource contentText is plain prose
     }
-    return [
-      {
-        question: 'Choose the correct verb: She ______ English stories every evening.',
-        options: ['read', 'reads', 'reading', 'to read'],
-        correctIndex: 1,
-        explanation: 'With third-person singular "She" in Present Simple, add -s to the verb.',
-      },
-      {
-        question: 'Identify the synonym of "brilliant" in academic English:',
-        options: ['ordinary', 'outstanding', 'careless', 'quiet'],
-        correctIndex: 1,
-        explanation: '"Outstanding" means exceptionally good or brilliant.',
-      },
-    ];
-  }, [resource]);
+
+    const gradeBankItems = questionBank.filter((q) => q.gradeId === resource.gradeId);
+    if (gradeBankItems.length > 0) {
+      return {
+        questions: gradeBankItems.map((q) => ({
+          question: q.prompt,
+          options: q.options,
+          correctIndex: q.correctIndex,
+          explanation: q.explanation,
+          unitLabel: q.unitLabel,
+        })),
+        sourceMode: 'bank',
+      };
+    }
+
+    return {
+      questions: [
+        {
+          question: 'Choose the correct verb: She ______ English stories every evening.',
+          options: ['read', 'reads', 'reading', 'to read'],
+          correctIndex: 1,
+          explanation: 'With third-person singular "She" in Present Simple, add -s to the verb.',
+        },
+        {
+          question: 'Identify the synonym of "brilliant" in academic English:',
+          options: ['ordinary', 'outstanding', 'careless', 'quiet'],
+          correctIndex: 1,
+          explanation: '"Outstanding" means exceptionally good or brilliant.',
+        },
+      ],
+      sourceMode: 'sample',
+    };
+  }, [resource, questionBank]);
 
   if (!resource) return null;
 
   const previewLimit = resource.isPaid ? Math.min(2, questions.length) : questions.length;
   const visibleQuestions = questions.slice(0, previewLimit);
+  const answeredCount = Object.keys(selectedAnswers).length;
   const score = visibleQuestions.reduce((acc, q, idx) => {
     return acc + (selectedAnswers[idx] === q.correctIndex ? 1 : 0);
   }, 0);
@@ -83,7 +123,13 @@ export function InteractiveQuizModal({
               </div>
             )}
             <p className="text-xs font-semibold text-sky-900">
-              {lang === 'ar' ? 'معاينة النشاط التفاعلي' : 'Interactive Activity Sandbox'}
+              {resource.id.startsWith('bank_quiz_') || sourceMode === 'bank'
+                ? lang === 'ar'
+                  ? 'أسئلة تفاعلية من بنك الصف الدراسي'
+                  : 'Interactive Grade Question Bank Practice'
+                : lang === 'ar'
+                ? 'معاينة النشاط التفاعلي'
+                : 'Interactive Activity Sandbox'}
             </p>
             <h3 className="text-xl font-bold text-slate-900 mt-1">
               {lang === 'ar' ? resource.titleAr : resource.titleEn}
@@ -99,17 +145,24 @@ export function InteractiveQuizModal({
           </button>
         </div>
 
-        <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm">
-          <span className="text-slate-700 font-medium">
-            {lang === 'ar' ? 'النتيجة الحالية:' : 'Current Score:'}{' '}
-            <strong className="font-mono-num text-sky-900">
-              {score} / {visibleQuestions.length}
-            </strong>
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="text-slate-700 font-medium">
+              {lang === 'ar' ? 'النتيجة الحالية:' : 'Current Score:'}{' '}
+              <strong className="font-mono-num text-sky-900">
+                {score} / {visibleQuestions.length}
+              </strong>
+            </span>
+            <span className="text-xs text-slate-500 font-mono-num">
+              {lang === 'ar'
+                ? `تمت الإجابة على ${answeredCount} من ${visibleQuestions.length}`
+                : `${answeredCount} / ${visibleQuestions.length} answered`}
+            </span>
+          </div>
           <button
             type="button"
             onClick={() => setSelectedAnswers({})}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>{lang === 'ar' ? 'إعادة المحاولة' : 'Reset'}</span>
@@ -122,9 +175,25 @@ export function InteractiveQuizModal({
             const hasAnswered = picked !== undefined;
             return (
               <div key={qIdx} className="border border-slate-200 rounded-xl p-4 space-y-3">
-                <p className="font-semibold text-slate-900 text-sm sm:text-base">
-                  {qIdx + 1}. {q.question}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    {q.unitLabel && (
+                      <p className="text-xs font-semibold text-sky-800">{q.unitLabel}</p>
+                    )}
+                    <p className="font-semibold text-slate-900 text-sm sm:text-base">
+                      {qIdx + 1}. {q.question}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => speakEnglishText(q.question)}
+                    title={lang === 'ar' ? 'استماع للسؤال بالإنجليزية' : 'Listen to question'}
+                    aria-label={lang === 'ar' ? 'استماع للسؤال بالإنجليزية' : 'Listen to question'}
+                    className="p-2 text-sky-900 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors shrink-0"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {q.options.map((opt, optIdx) => {
                     const isPicked = picked === optIdx;

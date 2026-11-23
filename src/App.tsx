@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowUp,
   BookOpen,
+  Brain,
+  Code2,
+  Compass,
   Download,
   FileText,
+  Gamepad2,
   Globe,
   Lock,
   Newspaper,
   Play,
   SlidersHorizontal,
+  Sparkles,
   Stamp,
 } from 'lucide-react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
@@ -73,6 +79,10 @@ import { WorksheetPacksSection } from './components/WorksheetPacksSection';
 import { CoursesAffiliateSection } from './components/CoursesAffiliateSection';
 import { TeacherQuizSection } from './components/TeacherQuizSection';
 import { PublicQuizViewer } from './components/PublicQuizViewer';
+import { IqChallengeSection } from './components/IqChallengeSection';
+import { KidsCodingGameSection } from './components/KidsCodingGameSection';
+import { EnglishGamesSection } from './components/EnglishGamesSection';
+import { DecisionLabSection } from './components/DecisionLabSection';
 import { AdminDashboardModal, type AdminTab } from './components/AdminDashboardModal';
 
 export default function App() {
@@ -100,6 +110,7 @@ export default function App() {
   const [stageFilter, setStageFilter] = useState<'all' | 'primary' | 'prep' | 'secondary'>('all');
   const [selectedGradeId, setSelectedGradeId] = useState<string>('prim4');
   const [categoryFilter, setCategoryFilter] = useState<'all' | ResourceCategory>('all');
+  const [activeBankUnitFilter, setActiveBankUnitFilter] = useState<string>('all');
   const [paymentIntent, setPaymentIntent] = useState<PaymentIntent | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<GradeResource | null>(null);
   const [excerptStory, setExcerptStory] = useState<StoryItem | null>(null);
@@ -116,6 +127,36 @@ export default function App() {
 
   const labels = t(lang);
   const isAdmin = Boolean(user && user.emailVerified && user.email === ADMIN_EMAIL);
+
+  const scrollToTargetSection = (sectionId: string) => {
+    const el = document.getElementById(sectionId);
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY - 76;
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  };
+
+  // Support direct social-post links like ?go=stories, ?go=iq-tests, ?go=coding-game, or #hash
+  useEffect(() => {
+    if (sharedPrepId || sharedQuizId) return;
+    const params = new URLSearchParams(window.location.search);
+    const targetId =
+      params.get('go') || params.get('section') || window.location.hash.replace(/^#/, '');
+    if (!targetId) return;
+
+    const timer = setTimeout(() => {
+      scrollToTargetSection(targetId);
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [cloudLoaded, sharedPrepId, sharedQuizId]);
+
+  useEffect(() => {
+    const handleHash = () => {
+      const targetId = window.location.hash.replace(/^#/, '');
+      if (targetId) scrollToTargetSection(targetId);
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
 
   // Keep HTML dir & lang synchronized
   useEffect(() => {
@@ -596,7 +637,65 @@ export default function App() {
     const matching = stage === 'all' ? GRADES : GRADES.filter((g) => g.stage === stage);
     if (matching.length > 0 && !matching.some((g) => g.id === selectedGradeId)) {
       setSelectedGradeId(matching[0].id);
+      setActiveBankUnitFilter('all');
     }
+  };
+
+  const activeGradeBankQuestions = useMemo(() => {
+    if (selectedGradeId === 'all') return questionBank;
+    return questionBank.filter((q) => q.gradeId === selectedGradeId);
+  }, [questionBank, selectedGradeId]);
+
+  const activeGradeBankUnits = useMemo(() => {
+    const units = new Set<string>();
+    activeGradeBankQuestions.forEach((q) => {
+      if (q.unitLabel && q.unitLabel.trim()) units.add(q.unitLabel.trim());
+    });
+    return Array.from(units);
+  }, [activeGradeBankQuestions]);
+
+  const filteredGradeBankQuestions = useMemo(() => {
+    if (activeBankUnitFilter === 'all') return activeGradeBankQuestions;
+    return activeGradeBankQuestions.filter(
+      (q) => (q.unitLabel || '').trim() === activeBankUnitFilter
+    );
+  }, [activeGradeBankQuestions, activeBankUnitFilter]);
+
+  const launchGradeBankQuiz = () => {
+    if (filteredGradeBankQuestions.length === 0) return;
+    const gradeMeta = GRADES.find((g) => g.id === selectedGradeId);
+    const unitSuffix =
+      activeBankUnitFilter !== 'all' ? ` · ${activeBankUnitFilter}` : '';
+    const titleAr = gradeMeta
+      ? `تدريب تفاعلي: ${gradeMeta.nameAr}${unitSuffix}`
+      : `تدريب تفاعلي شامل لكل الصفوف${unitSuffix}`;
+    const titleEn = gradeMeta
+      ? `Interactive Practice: ${gradeMeta.nameEn}${unitSuffix}`
+      : `Interactive Practice: All Grades${unitSuffix}`;
+
+    setActiveQuiz({
+      id: `bank_quiz_${selectedGradeId}_${activeBankUnitFilter}`,
+      gradeId: selectedGradeId === 'all' ? 'prim4' : selectedGradeId,
+      category: 'activity',
+      titleAr,
+      titleEn,
+      descriptionAr: 'أسئلة تفاعلية مباشرة من بنك أسئلة الصف مع التصحيح الفوري والنطق.',
+      descriptionEn: 'Live interactive questions from the Grade Question Bank with instant grading & audio.',
+      isInteractive: true,
+      isPaid: false,
+      priceEgp: 0,
+      allowWhiteLabel: false,
+      contentText: JSON.stringify(
+        filteredGradeBankQuestions.map((q) => ({
+          question: q.prompt,
+          options: q.options,
+          correctIndex: q.correctIndex,
+          explanation: q.explanation,
+          unitLabel: q.unitLabel,
+        }))
+      ),
+      authorUid: 'system',
+    });
   };
 
   if (sharedQuizId) {
@@ -701,6 +800,30 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* Mobile & Tablet Horizontal Quick-Jump Strip */}
+          <div className="lg:hidden w-full flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-slate-100">
+            {[
+              { id: 'english-games', ar: 'ألعاب الإنجليزي مجاناً', en: 'English Games' },
+              { id: 'decision-lab', ar: 'صنّاع القرار مجاناً', en: 'Decision Lab' },
+              { id: 'iq-tests', ar: 'ذكاء مجاني بالشهادة', en: 'Free IQ' },
+              { id: 'coding-game', ar: 'برمجة مجانية بالشهادة', en: 'Free Coding' },
+              { id: 'stories', ar: 'القصص', en: 'Stories' },
+              { id: 'worksheet-library', ar: 'حزم الورق', en: 'Packs' },
+              { id: 'grades', ar: 'الصفوف', en: 'Grades' },
+              { id: 'quiz-builder', ar: 'بنك الكويزات', en: 'Quiz Bank' },
+              { id: 'teacher-studio', ar: 'تحضير المعلم', en: 'Studio' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => scrollToTargetSection(item.id)}
+                className="px-3 py-1 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-sky-50 hover:text-sky-900 whitespace-nowrap shrink-0"
+              >
+                {lang === 'ar' ? item.ar : item.en}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -728,6 +851,89 @@ export default function App() {
                 >
                   {labels.heroSecondaryCta}
                 </a>
+              </div>
+
+              {/* Direct Free Highlight Shortcuts */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('english-games')}
+                  className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-start hover:bg-amber-100/80 transition-colors flex items-center gap-3"
+                >
+                  <Gamepad2 className="w-5 h-5 text-amber-700 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-amber-950 truncate">
+                      {lang === 'ar'
+                        ? 'ألعاب الإنجليزي (مجاني 100%)'
+                        : 'Free English Games'}
+                    </p>
+                    <p className="text-[11px] text-amber-800 truncate">
+                      {lang === 'ar'
+                        ? '3 مستويات للسن + صوت ومايك + شهادة PDF'
+                        : '3 age levels + mic coach + free PDF'}
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('decision-lab')}
+                  className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-start hover:bg-indigo-100/80 transition-colors flex items-center gap-3"
+                >
+                  <Compass className="w-5 h-5 text-indigo-800 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-indigo-950 truncate">
+                      {lang === 'ar'
+                        ? 'مختبر صنّاع القرار والمبدعين (مجاني)'
+                        : 'Decision Makers & Creators Lab (Free)'}
+                    </p>
+                    <p className="text-[11px] text-indigo-800 truncate">
+                      {lang === 'ar'
+                        ? '3 أعمار · محاكاة قرار + روبوت + مهام برا الشاشة'
+                        : '3 age levels · Decisions, Bot Bugs & Safe Builds'}
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('iq-tests')}
+                  className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-start hover:bg-emerald-100/80 transition-colors flex items-center gap-3"
+                >
+                  <Brain className="w-5 h-5 text-emerald-700 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-emerald-950 truncate">
+                      {lang === 'ar'
+                        ? 'اختبارات الذكاء والنفسية (مجاني)'
+                        : 'Free IQ & Psych Tests'}
+                    </p>
+                    <p className="text-[11px] text-emerald-800 truncate">
+                      {lang === 'ar'
+                        ? 'النتيجة الفورية + شهادة PDF مجاناً'
+                        : 'Instant score + free PDF certificate'}
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('coding-game')}
+                  className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-start hover:bg-sky-100/80 transition-colors flex items-center gap-3"
+                >
+                  <Code2 className="w-5 h-5 text-sky-900 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-sky-950 truncate">
+                      {lang === 'ar'
+                        ? 'ألعاب البرمجة للأطفال (مجاني)'
+                        : 'Free Kids Coding Games'}
+                    </p>
+                    <p className="text-[11px] text-sky-800 truncate">
+                      {lang === 'ar'
+                        ? 'تعلّم بالإنجليزية + شهادة PDF مجاناً'
+                        : 'Learn in English + free PDF certificate'}
+                    </p>
+                  </div>
+                </button>
               </div>
             </div>
 
@@ -846,7 +1052,10 @@ export default function App() {
             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setSelectedGradeId('all')}
+                onClick={() => {
+                  setSelectedGradeId('all');
+                  setActiveBankUnitFilter('all');
+                }}
                 className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
                   selectedGradeId === 'all'
                     ? 'border-sky-900 bg-sky-50 text-sky-950'
@@ -859,7 +1068,10 @@ export default function App() {
                 <button
                   key={grade.id}
                   type="button"
-                  onClick={() => setSelectedGradeId(grade.id)}
+                  onClick={() => {
+                    setSelectedGradeId(grade.id);
+                    setActiveBankUnitFilter('all');
+                  }}
                   className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
                     selectedGradeId === grade.id
                       ? 'border-sky-900 bg-sky-50 text-sky-950'
@@ -869,6 +1081,95 @@ export default function App() {
                   {lang === 'ar' ? grade.shortAr : grade.shortEn}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Direct Interactive Question Bank Practice Launcher for Selected Grade */}
+          <div className="bg-white border border-sky-200 rounded-2xl p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-900">
+                  <Sparkles className="w-4 h-4" />
+                  <span>
+                    {lang === 'ar'
+                      ? 'الأسئلة التفاعلية المرتبطة بمنهج الصف (مجاناً)'
+                      : 'Interactive Curriculum Question Bank (Free Practice)'}
+                  </span>
+                </span>
+                <span className="text-xs font-semibold text-emerald-700 font-mono-num">
+                  · {filteredGradeBankQuestions.length}{' '}
+                  {lang === 'ar' ? 'سؤال تفاعلي جاهز' : 'ready MCQs'}
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                {activeGradeBankQuestions.length > 0
+                  ? lang === 'ar'
+                    ? 'أي سؤال تفاعلي ترفعه الأكاديمية في بنك أسئلة هذا الصف يظهر هنا فوراً للطلاب للتدريب أونلاين بالصوت والتصحيح التلقائي.'
+                    : 'All MCQs saved in the Question Bank for this grade appear here automatically for instant online student practice with audio.'
+                  : lang === 'ar'
+                  ? 'لم تُضف أسئلة في بنك هذا الصف بعد — فور إضافتها من لوحة التحكم ستظهر هنا تلقائياً كأسئلة تفاعلية للطلاب.'
+                  : 'No questions added to this grade bank yet — once added in Admin, they appear here automatically as interactive questions.'}
+              </p>
+
+              {activeGradeBankUnits.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveBankUnitFilter('all')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
+                      activeBankUnitFilter === 'all'
+                        ? 'bg-sky-900 text-white border-sky-900'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {lang === 'ar' ? 'كل الوحدات' : 'All Units'}
+                  </button>
+                  {activeGradeBankUnits.map((unit) => (
+                    <button
+                      key={unit}
+                      type="button"
+                      onClick={() => setActiveBankUnitFilter(unit)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
+                        activeBankUnitFilter === unit
+                          ? 'bg-sky-900 text-white border-sky-900'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {unit}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {filteredGradeBankQuestions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={launchGradeBankQuiz}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 text-xs sm:text-sm font-bold text-white bg-sky-900 rounded-xl hover:bg-sky-800 transition-colors whitespace-nowrap"
+                >
+                  <Play className="w-4 h-4" />
+                  <span>
+                    {lang === 'ar'
+                      ? `ابدأ التدريب التفاعلي (${filteredGradeBankQuestions.length} سؤال)`
+                      : `Start Interactive Practice (${filteredGradeBankQuestions.length} MCQs)`}
+                  </span>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminInitialTab('quizbank');
+                    setAdminOpen(true);
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-3 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 transition-colors whitespace-nowrap"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'إضافة / إدارة أسئلة البنك' : 'Manage Bank'}</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1131,6 +1432,59 @@ export default function App() {
               ))}
             </div>
           )}
+
+          {/* Contextual Explore Strip for Direct Social Post Visitors */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span className="text-xs font-semibold text-slate-700">
+              {lang === 'ar'
+                ? 'استكشف أيضاً أقساماً مجانية ومدفوعة أخرى في المنصة:'
+                : 'Also explore free & interactive sections across the platform:'}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('english-games')}
+                className="px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'ألعاب الإنجليزي (مجاناً بالشهادة)' : 'Free English Games'}
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('decision-lab')}
+                className="px-3 py-1.5 text-xs font-semibold text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'صنّاع القرار والمبدعين (مجاناً)' : 'Free Decision Lab'}
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('iq-tests')}
+                className="px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'اختبارات الذكاء (مجاناً بالشهادة)' : 'Free IQ Lab'}
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('coding-game')}
+                className="px-3 py-1.5 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'ألعاب البرمجة (مجاناً بالشهادة)' : 'Free Coding Games'}
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('worksheet-library')}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 rounded-lg hover:bg-slate-200 whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'حزم أوراق العمل' : 'Worksheet Packs'}
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('grades')}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 rounded-lg hover:bg-slate-200 whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'الصفوف والتحضير' : 'All Grades'}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1167,6 +1521,18 @@ export default function App() {
         }}
       />
 
+      {/* Section 5B: Free IQ & Cognitive Challenges (Kids & Adults) */}
+      <IqChallengeSection lang={lang} settings={settings} />
+
+      {/* Section 5C: Interactive Kids Coding Adventure Game (CodeQuest) */}
+      <KidsCodingGameSection lang={lang} settings={settings} />
+
+      {/* Section 5D: 4 Interactive English Learning Mini-Games (Free + Badges + PDF Certificate) */}
+      <EnglishGamesSection lang={lang} settings={settings} />
+
+      {/* Section 5E: Decision Makers & Creators Lab (Free + 3 Age Tiers + Safe Off-Screen Missions + PDF) */}
+      <DecisionLabSection lang={lang} settings={settings} />
+
       {/* Section 6: Teacher Lesson Prep Studio + Facebook Sharing */}
       <TeacherPrepStudio lang={lang} user={user} settings={settings} onRequireSignIn={handleSignIn} />
 
@@ -1191,7 +1557,7 @@ export default function App() {
                 {papers.map((paper) => (
                   <div
                     key={paper.id}
-                    className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                   >
                     <div className="space-y-1">
                       <p className="text-xs font-medium text-slate-500">
@@ -1244,7 +1610,7 @@ export default function App() {
             {news.length === 0 ? (
               <p className="text-sm text-slate-500">{labels.emptyItems}</p>
             ) : (
-              <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl bg-slate-50 overflow-hidden">
+              <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl bg-white overflow-hidden">
                 {news.map((item) => (
                   <article key={item.id} className="p-5 space-y-2">
                     <p className="text-xs font-semibold text-sky-900">
@@ -1260,6 +1626,59 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      </section>
+
+      {/* Quick Platform Directory (Helps direct-link visitors explore the rest of the site) */}
+      <section className="py-10 bg-slate-100 border-t border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-600" />
+              <span>
+                {lang === 'ar'
+                  ? 'استكشف باقي أقسام المنصة المجانية والمدفوعة:'
+                  : 'Explore More Sections Across the Platform:'}
+              </span>
+            </h3>
+            <p className="text-xs text-slate-600">
+              {lang === 'ar'
+                ? 'انتقل مباشرة لأي قسم من هنا لتجربة الأدوات المجانية أو تصفح الكتب والمناهج.'
+                : 'Jump cleanly to any free learning game, IQ assessment, story library, or teacher tool.'}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { id: 'english-games', ar: 'ألعاب الإنجليزي (مجاني بالشهادة)', en: 'Free English Games' },
+              { id: 'decision-lab', ar: 'صنّاع القرار والمبدعين (مجاني)', en: 'Free Decision Lab' },
+              { id: 'iq-tests', ar: 'اختبارات الذكاء (مجاني بالشهادة)', en: 'Free IQ & Psych Lab' },
+              { id: 'coding-game', ar: 'ألعاب البرمجة (مجاني بالشهادة)', en: 'Free Kids Coding' },
+              { id: 'stories', ar: 'القصص الإنجليزية', en: 'Stories' },
+              { id: 'worksheet-library', ar: 'حزم أوراق العمل', en: 'Worksheet Packs' },
+              { id: 'grades', ar: 'الصفوف والتحضير', en: 'Grades & Preps' },
+              { id: 'quiz-builder', ar: 'بنك الأسئلة والكويزات', en: 'Quiz Bank' },
+              { id: 'certificates', ar: 'شهادات الذكاء الاصطناعي', en: 'AI Certificates' },
+              { id: 'teacher-studio', ar: 'استوديو المعلم', en: 'Teacher Studio' },
+            ].map((sec) => (
+              <button
+                key={sec.id}
+                type="button"
+                onClick={() => scrollToTargetSection(sec.id)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg hover:border-sky-800 hover:text-sky-900 transition-colors whitespace-nowrap"
+              >
+                {lang === 'ar' ? sec.ar : sec.en}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-sky-900 rounded-lg hover:bg-sky-800 whitespace-nowrap"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+              <span>{lang === 'ar' ? 'الرئيسية' : 'Top'}</span>
+            </button>
           </div>
         </div>
       </section>
@@ -1348,10 +1767,12 @@ export default function App() {
 
       {/* Interactive Quiz Sandbox Modal */}
       <InteractiveQuizModal
+        key={activeQuiz?.id || 'closed'}
         resource={activeQuiz}
         lang={lang}
         academyName={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
         logoDataUrl={settings.logoDataUrl}
+        questionBank={questionBank}
         onClose={() => setActiveQuiz(null)}
         onBuyFull={(res) =>
           setPaymentIntent({
