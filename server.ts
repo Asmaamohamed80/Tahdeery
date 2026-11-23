@@ -96,7 +96,7 @@ function buildZipBuffer(entries: Array<{ name: string; data: Buffer }>): Buffer 
 }
 
 function collectProjectFiles(rootDir: string, currentDir = rootDir): Array<{ name: string; data: Buffer }> {
-  const excludedDirs = new Set(['node_modules', 'dist', 'build', '.git', 'coverage']);
+  const excludedDirs = new Set(['node_modules', 'dist', 'build', '.git', 'coverage', '.aistudio']);
   const results: Array<{ name: string; data: Buffer }> = [];
   const items = fs.readdirSync(currentDir, { withFileTypes: true });
 
@@ -132,6 +132,59 @@ function getAiClient(): GoogleGenAI | null {
       },
     },
   });
+}
+
+function isTransientAiOverloadError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error || '');
+  return (
+    msg.includes('503') ||
+    msg.includes('UNAVAILABLE') ||
+    msg.includes('high demand') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('429')
+  );
+}
+
+async function generateWithRetryAndFallback(
+  ai: GoogleGenAI,
+  params: {
+    contents: unknown;
+    config: Record<string, unknown>;
+    preferFastThinking?: boolean;
+  }
+) {
+  const attempts: Array<{ model: string; delayMs: number; useLowThinking: boolean }> = [
+    { model: 'gemini-4-hydrogen', delayMs: 0, useLowThinking: Boolean(params.preferFastThinking) },
+    { model: 'gemini-4-hydrogen', delayMs: 1200, useLowThinking: Boolean(params.preferFastThinking) },
+    { model: 'gemini-3.1-flash-lite', delayMs: 800, useLowThinking: false },
+  ];
+
+  let lastError: unknown;
+  for (const step of attempts) {
+    if (step.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, step.delayMs));
+    }
+    try {
+      const stepConfig = step.useLowThinking
+        ? {
+            ...params.config,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          }
+        : params.config;
+
+      return await ai.models.generateContent({
+        model: step.model,
+        contents: params.contents as Parameters<typeof ai.models.generateContent>[0]['contents'],
+        config: stepConfig as Parameters<typeof ai.models.generateContent>[0]['config'],
+      });
+    } catch (err) {
+      lastError = err;
+      if (!isTransientAiOverloadError(err)) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function startServer() {
@@ -175,6 +228,7 @@ async function startServer() {
       const files = collectProjectFiles(__dirname);
       const zipBuf = buildZipBuffer(files);
 
+      res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', 'attachment; filename="tahdeery-linguacraft.zip"');
       return res.send(zipBuf);
@@ -235,8 +289,7 @@ Return a JSON object with:
 - badgeMotto: Short 2-4 word English motto (e.g. "Fluency & Bright Minds").`,
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+      const response = await generateWithRetryAndFallback(ai, {
         contents: { parts },
         config: {
           responseMimeType: 'application/json',
@@ -279,8 +332,7 @@ Return a JSON object with:
         });
       }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+      const response = await generateWithRetryAndFallback(ai, {
         contents: `Create a structured, classroom-ready English Language electronic lesson preparation plan for an Egyptian/Arab school teacher.
 Grade: ${gradeLabel || 'Primary 4'}
 Unit: ${unitTitle || 'Unit 1'}
@@ -381,32 +433,14 @@ Rules:
         required: ['questions'],
       };
 
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: { parts },
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema,
-          },
-        });
-      } catch (primaryErr) {
-        const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
-        if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand')) {
-          response = await ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: { parts },
-            config: {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-              responseMimeType: 'application/json',
-              responseSchema,
-            },
-          });
-        } else {
-          throw primaryErr;
-        }
-      }
+      const response = await generateWithRetryAndFallback(ai, {
+        contents: { parts },
+        preferFastThinking: true,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema,
+        },
+      });
 
       const parsed = JSON.parse((response.text ?? '{"questions":[]}').trim()) as {
         questions?: Array<{

@@ -997,18 +997,25 @@ export function AdminDashboardModal({
         throw new Error(errData.error || 'Failed to export ZIP');
       }
       const blob = await resp.blob();
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+        now.getDate()
+      ).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(
+        now.getMinutes()
+      ).padStart(2, '0')}`;
+      const fileName = `tahdeery-linguacraft-${stamp}.zip`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'tahdeery-linguacraft.zip';
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1500);
       setFeedback(
         lang === 'ar'
-          ? 'تم تحميل ملف المشروع المضغوط (ZIP) جاهزاً للرفع على GitHub.'
-          : 'Project ZIP downloaded and ready for GitHub.'
+          ? `تم تحميل أحدث نسخة (${fileName})! تأكدي أن تفكي ضغطها وتستبدلي ملفات المشروع الرئيسية مباشرة ثم رفع التحديث إلى GitHub (git push).`
+          : `Downloaded latest build (${fileName})! Extract & replace root project files directly before git push.`
       );
     } catch (err) {
       setFeedback(err instanceof Error ? err.message : 'ZIP export failed');

@@ -125,31 +125,47 @@ Rules:
       required: ['questions'],
     };
 
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: { parts },
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema,
-        },
-      });
-    } catch (primaryErr) {
-      const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
-      if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('high demand')) {
+    const attempts: Array<{ model: string; delayMs: number; useLowThinking: boolean }> = [
+      { model: 'gemini-4-hydrogen', delayMs: 0, useLowThinking: true },
+      { model: 'gemini-4-hydrogen', delayMs: 1200, useLowThinking: true },
+      { model: 'gemini-3.1-flash-lite', delayMs: 800, useLowThinking: false },
+    ];
+
+    let response: Awaited<ReturnType<typeof ai.models.generateContent>> | undefined;
+    let lastError: unknown;
+
+    for (const step of attempts) {
+      if (step.delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, step.delayMs));
+      }
+      try {
         response = await ai.models.generateContent({
-          model: 'gemini-4-hydrogen',
+          model: step.model,
           contents: { parts },
           config: {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            ...(step.useLowThinking
+              ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+              : {}),
             responseMimeType: 'application/json',
             responseSchema,
           },
         });
-      } else {
-        throw primaryErr;
+        break;
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err || '');
+        const transient =
+          msg.includes('503') ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('high demand') ||
+          msg.includes('429') ||
+          msg.includes('RESOURCE_EXHAUSTED');
+        if (!transient) throw err;
       }
+    }
+
+    if (!response) {
+      throw lastError;
     }
 
     const parsed = JSON.parse((response.text ?? '{"questions":[]}').trim()) as {
