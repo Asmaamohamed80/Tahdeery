@@ -14,7 +14,6 @@ import {
   Recycle,
   RotateCcw,
   ShieldAlert,
-  Sparkles,
   Trash2,
   Volume2,
   VolumeX,
@@ -502,7 +501,7 @@ export function LogicLabGame({ lang, solvedMissions, onMissionSolved }: LogicLab
             >
               <div className="flex items-start gap-2.5">
                 {feedback.type === 'win' ? (
-                  <Sparkles className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
                 ) : (
                   <Bug className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
                 )}

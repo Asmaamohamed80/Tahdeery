@@ -23,20 +23,27 @@ function formatFriendlyAiError(err: unknown): { status: number; message: string 
     return {
       status: 503,
       message:
-        'الذكاء الاصطناعي عليه ضغط مؤقت الآن، يرجى المحاولة مرة أخرى بعد لحظات (أو تقسيم الأسئلة في الخانة النصية).',
+        'الذكاء الاصطناعي عليه ضغط مؤقت الآن. جرّبي مرة أخرى بعد ثوانٍ أو استخدمي زر «الاستيراد السريع للنص بدون AI» بالأسفل.',
     };
   }
   if (raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED')) {
     return {
       status: 429,
-      message: 'تم تجاوز حد الطلبات المؤقت، يرجى الانتظار دقيقة ثم المحاولة مرة أخرى.',
+      message: 'تم تجاوز حد الطلبات المؤقت للـ API، يرجى الانتظار دقيقة ثم المحاولة مرة أخرى.',
+    };
+  }
+  if (raw.includes('API_KEY_INVALID') || raw.includes('403') || raw.includes('PERMISSION_DENIED')) {
+    return {
+      status: 403,
+      message:
+        'مفتاح Gemini API غير صالح أو يحتاج مراجعة في إعدادات Vercel (GEMINI_API_KEY).',
     };
   }
   if (raw.includes('400') || raw.includes('INVALID_ARGUMENT')) {
     return {
       status: 400,
       message:
-        'تعذر قراءة هذا الملف مباشرة (قد يكون حجمه أو عدد صفحاته كبيراً). انسخي منه ٢٠–٣٠ سؤالاً والصقيهم في المربع بالأسفل.',
+        'تعذر قراءة هذا الجزء من الملف. جرّبي تقليل عدد الصفحات أو لصق النص مباشرة في المربع بالأسفل.',
     };
   }
   return { status: 500, message: raw || 'Failed to extract questions from PDF/text.' };
@@ -66,7 +73,8 @@ export default async function handler(req: Req, res: Res) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
       return res.status(503).json({
-        error: 'Gemini API key is not configured in Vercel Environment Variables.',
+        error:
+          'مفتاح الذكاء الاصطناعي (GEMINI_API_KEY) غير مضاف في إعدادات Vercel حالياً. أضيفيه في Vercel Environment Variables أو استخدمي الاستيراد السريع للنص بالأسفل.',
       });
     }
 
@@ -127,8 +135,9 @@ Rules:
 
     const attempts: Array<{ model: string; delayMs: number; useLowThinking: boolean }> = [
       { model: 'gemini-4-hydrogen', delayMs: 0, useLowThinking: true },
-      { model: 'gemini-4-hydrogen', delayMs: 1200, useLowThinking: true },
-      { model: 'gemini-3.1-flash-lite', delayMs: 800, useLowThinking: false },
+      { model: 'gemini-3.1-flash-lite', delayMs: 600, useLowThinking: false },
+      { model: 'gemini-4-hydrogen', delayMs: 1400, useLowThinking: true },
+      { model: 'gemini-3.1-flash-lite', delayMs: 2000, useLowThinking: false },
     ];
 
     let response: Awaited<ReturnType<typeof ai.models.generateContent>> | undefined;
@@ -159,7 +168,9 @@ Rules:
           msg.includes('UNAVAILABLE') ||
           msg.includes('high demand') ||
           msg.includes('429') ||
-          msg.includes('RESOURCE_EXHAUSTED');
+          msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('404') ||
+          msg.includes('NOT_FOUND');
         if (!transient) throw err;
       }
     }

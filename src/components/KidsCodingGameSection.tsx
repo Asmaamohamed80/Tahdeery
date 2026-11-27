@@ -13,7 +13,6 @@ import {
   Play,
   Repeat,
   RotateCcw,
-  Sparkles,
   Star,
   Trash2,
   Trophy,
@@ -580,7 +579,7 @@ export function KidsCodingGameSection({ lang, settings }: KidsCodingGameSectionP
                   >
                     <div className="flex items-start gap-2.5">
                       {statusMsg.type === 'win' ? (
-                        <Sparkles className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                        <Trophy className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
                       ) : (
                         <Bug className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
                       )}

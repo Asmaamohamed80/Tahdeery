@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Award, Download, Sparkles, Upload } from 'lucide-react';
+import { Award, Download, Upload, Wand2 } from 'lucide-react';
 import type { AcademySettings, Lang, PaymentIntent } from '../types';
 import { CERTIFICATE_SEAL_IMAGE } from '../data/starterCatalog';
 import { t } from '../i18n';
@@ -383,7 +383,7 @@ export function CertificateStudio({
               onClick={handleGenerateAi}
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 transition-colors disabled:opacity-60"
             >
-              <Sparkles className="w-4 h-4" />
+              <Wand2 className="w-4 h-4" />
               <span>{loadingAi ? labels.generating : labels.generateAiCertBtn}</span>
             </button>
           </div>

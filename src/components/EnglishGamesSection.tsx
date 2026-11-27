@@ -16,7 +16,6 @@ import {
   RotateCcw,
   Search,
   Shuffle,
-  Sparkles,
   Square,
   Star,
   Store,
@@ -976,7 +975,7 @@ export function EnglishGamesSection({ lang, settings }: EnglishGamesSectionProps
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div className="max-w-3xl space-y-2.5">
             <div className="flex items-center gap-2 text-xs font-bold text-emerald-700">
-              <Sparkles className="w-4 h-4 shrink-0" />
+              <GraduationCap className="w-4 h-4 shrink-0" />
               <span>
                 {lang === 'ar'
                   ? 'مجاني 100% · 3 مستويات للسن · استماع وميكروفون نطق تفاعلي + شهادة PDF مجاناً'

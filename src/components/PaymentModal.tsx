@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Check, Copy, ExternalLink, MessageCircle, X } from 'lucide-react';
+import { Check, CheckCircle2, Copy, ExternalLink, KeyRound, MessageCircle, X } from 'lucide-react';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import type { AcademySettings, Lang, PaymentIntent } from '../types';
+import { redeemActivationCode, type UnlockedState } from '../utils/analyticsAndUnlock';
 import { t } from '../i18n';
 
 interface PaymentModalProps {
@@ -11,16 +12,28 @@ interface PaymentModalProps {
   settings: AcademySettings;
   lang: Lang;
   user: User | null;
+  onUnlockedSuccess?: (nextState: UnlockedState) => void;
   onClose: () => void;
 }
 
-export function PaymentModal({ intent, settings, lang, user, onClose }: PaymentModalProps) {
+export function PaymentModal({
+  intent,
+  settings,
+  lang,
+  user,
+  onUnlockedSuccess,
+  onClose,
+}: PaymentModalProps) {
   const labels = t(lang);
   const [customerName, setCustomerName] = useState(user?.displayName || '');
   const [customBrandingName, setCustomBrandingName] = useState(intent?.defaultBrandingName || '');
   const [instapayRef, setInstapayRef] = useState('');
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const [codeInput, setCodeInput] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemFeedback, setRedeemFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   if (!intent) return null;
 
@@ -31,6 +44,20 @@ export function PaymentModal({ intent, settings, lang, user, onClose }: PaymentM
       setTimeout(() => setCopied(false), 1800);
     } catch {
       // Fallback ignored if clipboard blocked
+    }
+  };
+
+  const handleRedeemCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!codeInput.trim()) return;
+    setRedeeming(true);
+    setRedeemFeedback(null);
+    const res = await redeemActivationCode(codeInput, lang);
+    setRedeeming(false);
+    setRedeemFeedback({ ok: res.ok, text: res.message });
+    if (res.ok && res.unlockedState) {
+      onUnlockedSuccess?.(res.unlockedState);
+      setCodeInput('');
     }
   };
 
@@ -104,6 +131,67 @@ export function PaymentModal({ intent, settings, lang, user, onClose }: PaymentM
             {intent.amountEgp} {labels.egp}
           </span>
         </div>
+
+        {/* Instant Activation Code Box */}
+        <form
+          onSubmit={handleRedeemCode}
+          className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-2.5"
+        >
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-950">
+            <KeyRound className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>
+              {lang === 'ar'
+                ? 'معك كود تفعيل من الإدارة؟ افتح الملف فوراً:'
+                : 'Have an Activation Code? Unlock immediately:'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              dir="ltr"
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+              placeholder="LC-XXXX-XXXX"
+              className="flex-1 px-3 py-2 text-xs font-mono uppercase bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700"
+            />
+            <button
+              type="submit"
+              disabled={redeeming || !codeInput.trim()}
+              className="px-4 py-2 text-xs font-semibold text-white bg-emerald-700 rounded-lg hover:bg-emerald-600 disabled:opacity-60 whitespace-nowrap"
+            >
+              {redeeming
+                ? lang === 'ar'
+                  ? 'جاري التحقق...'
+                  : 'Checking...'
+                : lang === 'ar'
+                ? 'تفعيل الكود'
+                : 'Unlock Now'}
+            </button>
+          </div>
+          {redeemFeedback && (
+            <div
+              className={`flex items-center justify-between gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
+                redeemFeedback.ok
+                  ? 'bg-white text-emerald-900 border border-emerald-300'
+                  : 'bg-rose-50 text-rose-800 border border-rose-200'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {redeemFeedback.ok && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                <span>{redeemFeedback.text}</span>
+              </span>
+              {redeemFeedback.ok && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-emerald-700 text-white rounded hover:bg-emerald-600 shrink-0"
+                >
+                  {lang === 'ar' ? 'ابدأ التحميل' : 'Go Download'}
+                </button>
+              )}
+            </div>
+          )}
+        </form>
 
         <div className="space-y-3">
           <p className="text-sm font-semibold text-slate-900">{labels.paymentStep1}</p>

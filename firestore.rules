@@ -361,6 +361,45 @@ service cloud.firestore {
         && data.activatedAt is timestamp;
     }
 
+    function isValidActivationCode(data) {
+      return data.keys().hasAll([
+          'code', 'targetType', 'targetId', 'targetTitle',
+          'maxUses', 'usedCount', 'active', 'createdByUid', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'code', 'targetType', 'targetId', 'targetTitle', 'note',
+          'maxUses', 'usedCount', 'active', 'createdByUid', 'createdAt'
+        ])
+        && isValidId(data.code)
+        && data.code.size() >= 4 && data.code.size() <= 64
+        && data.targetType in ['resource', 'pack', 'story', 'all_paid']
+        && data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128
+        && data.targetTitle is string && data.targetTitle.size() >= 1 && data.targetTitle.size() <= 180
+        && (!data.keys().hasAny(['note']) || (data.note is string && data.note.size() <= 160))
+        && data.maxUses is number && data.maxUses >= 1 && data.maxUses <= 500
+        && data.usedCount is number && data.usedCount >= 0 && data.usedCount <= data.maxUses
+        && data.active is bool
+        && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAnalyticsEvent(data) {
+      return data.keys().hasAll([
+          'eventType', 'section', 'itemTitle', 'deviceType', 'lang', 'dayKey', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'eventType', 'section', 'itemTitle', 'itemId', 'deviceType', 'lang', 'dayKey', 'createdAt'
+        ])
+        && data.eventType in ['page_visit', 'file_download', 'interactive_start', 'code_redeem']
+        && data.section is string && data.section.size() >= 1 && data.section.size() <= 40
+        && data.itemTitle is string && data.itemTitle.size() >= 1 && data.itemTitle.size() <= 180
+        && (!data.keys().hasAny(['itemId']) || (data.itemId is string && data.itemId.size() <= 128))
+        && data.deviceType in ['mobile', 'desktop']
+        && data.lang in ['ar', 'en']
+        && data.dayKey is string && data.dayKey.size() == 10 && data.dayKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.createdAt is timestamp;
+    }
+
     match /settings/{settingId} {
       allow get: if isValidId(settingId);
       allow list: if false;
@@ -594,6 +633,48 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/teacher_quizzes/$(incoming().quizId)).data.isPublished == true;
       allow update: if false;
       allow delete: if isValidId(attemptId) && isVerifiedUser() && (existing().quizOwnerUid == request.auth.uid || isAdmin());
+    }
+
+    match /activation_codes/{codeId} {
+      allow get: if isValidId(codeId);
+      allow list: if isAdmin();
+      allow create: if isValidId(codeId) && isAdmin() && isValidActivationCode(incoming())
+        && incoming().code == codeId
+        && incoming().usedCount == 0
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(codeId) && isValidActivationCode(incoming()) && (
+        (
+          isAdmin()
+          && incoming().code == existing().code
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['active', 'maxUses', 'note'])
+        ) || (
+          existing().active == true
+          && existing().usedCount < existing().maxUses
+          && incoming().usedCount == existing().usedCount + 1
+          && incoming().code == existing().code
+          && incoming().targetType == existing().targetType
+          && incoming().targetId == existing().targetId
+          && incoming().targetTitle == existing().targetTitle
+          && incoming().maxUses == existing().maxUses
+          && incoming().active == existing().active
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['usedCount'])
+        )
+      );
+      allow delete: if isValidId(codeId) && isAdmin();
+    }
+
+    match /analytics_events/{eventId} {
+      allow get: if isValidId(eventId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(eventId) && isValidAnalyticsEvent(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(eventId) && isAdmin();
     }
 
     match /admins/{uid} {

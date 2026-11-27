@@ -247,10 +247,40 @@ export interface OrderRecord {
   createdAt?: unknown;
 }
 
+export type VisitorRole = 'all' | 'teacher' | 'student' | 'parent';
+
+export interface ActivationCode {
+  id: string;
+  code: string;
+  targetType: 'resource' | 'pack' | 'story' | 'all_paid';
+  targetId: string;
+  targetTitle: string;
+  note?: string;
+  maxUses: number;
+  usedCount: number;
+  active: boolean;
+  createdByUid: string;
+  createdAt?: unknown;
+}
+
+export interface AnalyticsEvent {
+  id: string;
+  eventType: 'page_visit' | 'file_download' | 'interactive_start' | 'code_redeem';
+  section: string;
+  itemTitle: string;
+  itemId?: string;
+  deviceType: 'mobile' | 'desktop';
+  lang: Lang;
+  dayKey: string;
+  createdAt?: unknown;
+}
+
 export interface PaymentIntent {
   itemType: OrderRecord['itemType'];
   itemTitle: string;
   amountEgp: number;
+  targetType?: ActivationCode['targetType'];
+  targetId?: string;
   allowCustomBranding?: boolean;
   defaultBrandingName?: string;
   extraNote?: string;

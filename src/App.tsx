@@ -1,25 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   BookOpen,
   Brain,
+  CheckCircle2,
   Code2,
   Compass,
   Download,
   FileText,
   Gamepad2,
   Globe,
+  GraduationCap,
+  KeyRound,
   Lock,
   Newspaper,
   Play,
   SlidersHorizontal,
-  Sparkles,
   Stamp,
+  Users,
+  X,
 } from 'lucide-react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   collection,
   doc,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -37,6 +44,7 @@ import {
   OperationType,
 } from './firebase';
 import {
+  CLASSROOM_PHONICS_IMAGE,
   DEFAULT_SETTINGS,
   HERO_BANNER_IMAGE,
   STARTER_COURSES,
@@ -47,11 +55,15 @@ import {
   STARTER_STORIES,
   STARTER_WORKSHEET_ITEMS,
   STARTER_WORKSHEET_PACKS,
+  STUDENT_AWARD_IMAGE,
+  STUDENT_TABLET_IMAGE,
 } from './data/starterCatalog';
 import {
   GRADES,
   type AcademySettings,
+  type ActivationCode,
   type AffiliateCourse,
+  type AnalyticsEvent,
   type GradeResource,
   type Lang,
   type NewsItem,
@@ -64,11 +76,20 @@ import {
   type StoryItem,
   type TeacherQuiz,
   type TeacherSubscription,
+  type VisitorRole,
   type WorksheetPack,
   type WorksheetPackItem,
 } from './types';
 import { t } from './i18n';
 import { downloadTextOrHtmlFile } from './utils/download';
+import {
+  getUnlockedState,
+  isItemUnlocked,
+  redeemActivationCode,
+  trackAnalyticsEvent,
+  trackSessionVisitOnce,
+  type UnlockedState,
+} from './utils/analyticsAndUnlock';
 import { Header } from './components/Header';
 import { PaymentModal } from './components/PaymentModal';
 import { InteractiveQuizModal } from './components/InteractiveQuizModal';
@@ -103,8 +124,28 @@ export default function App() {
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([]);
   const [mySubscription, setMySubscription] = useState<TeacherSubscription | null>(null);
   const [adminSubscriptions, setAdminSubscriptions] = useState<TeacherSubscription[]>([]);
+  const [activationCodes, setActivationCodes] = useState<ActivationCode[]>([]);
+  const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [cloudLoaded, setCloudLoaded] = useState(false);
+
+  // Visitor role guidance (non-destructive: highlights recommended tools without hiding any sections)
+  const [visitorRole, setVisitorRole] = useState<VisitorRole>(() => {
+    try {
+      const saved = window.localStorage.getItem('lc_visitor_role_v1');
+      if (saved === 'teacher' || saved === 'student' || saved === 'parent' || saved === 'all') {
+        return saved;
+      }
+    } catch {
+      // Ignore storage read error
+    }
+    return 'all';
+  });
+  const [unlockedState, setUnlockedState] = useState<UnlockedState>(() => getUnlockedState());
+  const [codeModalOpen, setCodeModalOpen] = useState(false);
+  const [codeModalInput, setCodeModalInput] = useState('');
+  const [codeModalBusy, setCodeModalBusy] = useState(false);
+  const [codeModalFeedback, setCodeModalFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Filters & interactive modals
   const [stageFilter, setStageFilter] = useState<'all' | 'primary' | 'prep' | 'secondary'>('all');
@@ -163,6 +204,35 @@ export default function App() {
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = lang;
   }, [lang]);
+
+  // Track unique-session page visit once on mount (anonymous, zero PII)
+  useEffect(() => {
+    trackSessionVisitOnce(lang);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSelectRole = (role: VisitorRole) => {
+    setVisitorRole(role);
+    try {
+      window.localStorage.setItem('lc_visitor_role_v1', role);
+    } catch {
+      // Ignore storage error
+    }
+  };
+
+  const handleRedeemStandaloneCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!codeModalInput.trim()) return;
+    setCodeModalBusy(true);
+    setCodeModalFeedback(null);
+    const res = await redeemActivationCode(codeModalInput, lang);
+    setCodeModalBusy(false);
+    setCodeModalFeedback({ ok: res.ok, text: res.message });
+    if (res.ok && res.unlockedState) {
+      setUnlockedState(res.unlockedState);
+      setCodeModalInput('');
+    }
+  };
 
   // Auth listener
   useEffect(() => {
@@ -279,7 +349,7 @@ export default function App() {
     };
   }, []);
 
-  // Orders, teacher quizzes, attempts & subscriptions listeners (authenticated users only)
+  // Orders, teacher quizzes, attempts, subscriptions, codes & analytics listeners
   useEffect(() => {
     if (!authReady || !user || !user.emailVerified) {
       setOrders([]);
@@ -287,6 +357,8 @@ export default function App() {
       setQuizAttempts([]);
       setMySubscription(null);
       setAdminSubscriptions([]);
+      setActivationCodes([]);
+      setAnalyticsEvents([]);
       return;
     }
 
@@ -354,6 +426,8 @@ export default function App() {
     );
 
     let unsubAdminSubs: (() => void) | undefined;
+    let unsubCodes: (() => void) | undefined;
+    let unsubAnalytics: (() => void) | undefined;
     if (isAdmin) {
       unsubAdminSubs = onSnapshot(
         collection(db, 'teacher_subscriptions'),
@@ -367,8 +441,30 @@ export default function App() {
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'teacher_subscriptions')
       );
+
+      unsubCodes = onSnapshot(
+        query(collection(db, 'activation_codes'), orderBy('createdAt', 'desc')),
+        (snap) => {
+          setActivationCodes(
+            snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ActivationCode, 'id'>) }))
+          );
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'activation_codes')
+      );
+
+      unsubAnalytics = onSnapshot(
+        query(collection(db, 'analytics_events'), orderBy('createdAt', 'desc'), limit(300)),
+        (snap) => {
+          setAnalyticsEvents(
+            snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnalyticsEvent, 'id'>) }))
+          );
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'analytics_events')
+      );
     } else {
       setAdminSubscriptions([]);
+      setActivationCodes([]);
+      setAnalyticsEvents([]);
     }
 
     return () => {
@@ -377,6 +473,8 @@ export default function App() {
       unsubAttempts();
       unsubMySub();
       if (unsubAdminSubs) unsubAdminSubs();
+      if (unsubCodes) unsubCodes();
+      if (unsubAnalytics) unsubAnalytics();
     };
   }, [authReady, user, isAdmin]);
 
@@ -661,6 +759,17 @@ export default function App() {
     );
   }, [activeGradeBankQuestions, activeBankUnitFilter]);
 
+  const openInteractiveResource = (item: GradeResource) => {
+    void trackAnalyticsEvent({
+      eventType: 'interactive_start',
+      section: 'grades',
+      itemTitle: lang === 'ar' ? item.titleAr : item.titleEn,
+      itemId: item.id,
+      lang,
+    });
+    setActiveQuiz(item);
+  };
+
   const launchGradeBankQuiz = () => {
     if (filteredGradeBankQuestions.length === 0) return;
     const gradeMeta = GRADES.find((g) => g.id === selectedGradeId);
@@ -672,6 +781,14 @@ export default function App() {
     const titleEn = gradeMeta
       ? `Interactive Practice: ${gradeMeta.nameEn}${unitSuffix}`
       : `Interactive Practice: All Grades${unitSuffix}`;
+
+    void trackAnalyticsEvent({
+      eventType: 'interactive_start',
+      section: 'grades_bank',
+      itemTitle: lang === 'ar' ? titleAr : titleEn,
+      itemId: selectedGradeId,
+      lang,
+    });
 
     setActiveQuiz({
       id: `bank_quiz_${selectedGradeId}_${activeBankUnitFilter}`,
@@ -754,71 +871,199 @@ export default function App() {
         onSignIn={handleSignIn}
       />
 
-      {/* Workspace Language & Quick Utility Strip */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3 text-xs text-slate-600">
+      {/* Workspace Language & Editorial Bar */}
+      <div className="bg-slate-50/80 border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-xs text-slate-600">
             {settings.logoDataUrl && (
               <img
                 src={settings.logoDataUrl}
                 alt={lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
                 referrerPolicy="no-referrer"
-                className="h-7 w-auto max-w-[96px] object-contain rounded shrink-0"
+                className="h-6 w-auto max-w-[88px] object-contain rounded shrink-0"
               />
             )}
             <span className="font-semibold text-slate-900">
               {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
             </span>
-            <span aria-hidden="true">·</span>
-            <span>
+            <span className="hidden sm:inline text-slate-300" aria-hidden="true">|</span>
+            <span className="hidden sm:inline text-slate-500">
               {lang === 'ar'
-                ? 'منصة متخصصة لمعلمي وطلاب اللغة الإنجليزية'
-                : 'Dedicated English Teaching & Learning Hub'}
+                ? 'بيئة تعليمية متخصصة لمناهج اللغة الإنجليزية من التأسيس حتى الثانوي'
+                : 'Curriculum-aligned English learning & classroom prep portal'}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-sky-900" />
-            <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setLang('ar')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
-                  lang === 'ar' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                العربية
-              </button>
-              <button
-                type="button"
-                onClick={() => setLang('en')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
-                  lang === 'en' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                English
-              </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setCodeModalFeedback(null);
+                setCodeModalOpen(true);
+              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                unlockedState.allPaid || unlockedState.ids.length > 0
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                  : 'bg-white border-slate-200 text-slate-800 hover:border-sky-800 hover:text-sky-900'
+              }`}
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{lang === 'ar' ? 'تفعيل بكود' : 'Redeem Code'}</span>
+              {(unlockedState.allPaid || unlockedState.ids.length > 0) && (
+                <span className="text-[11px] text-emerald-700 font-mono-num">
+                  · {unlockedState.allPaid ? (lang === 'ar' ? 'شامل' : 'VIP') : unlockedState.ids.length}
+                </span>
+              )}
+            </button>
+
+            <div className="flex items-center gap-1.5">
+              <Globe className="w-3.5 h-3.5 text-slate-500" />
+              <div className="inline-flex items-center p-0.5 bg-white rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setLang('ar')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                    lang === 'ar' ? 'bg-sky-900 text-white' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  العربية
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLang('en')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                    lang === 'en' ? 'bg-sky-900 text-white' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  English
+                </button>
+              </div>
             </div>
           </div>
 
+          {/* Non-Destructive Visitor Role Switcher (Highlights Top Tools Without Hiding Anything) */}
+          <div className="w-full pt-2 mt-0.5 border-t border-slate-200/80 flex flex-col gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <Users className="w-3.5 h-3.5 text-sky-900 shrink-0" />
+                <span className="font-semibold text-slate-800">
+                  {lang === 'ar' ? 'توجيه سريع حسب دورك:' : 'Quick Role Spotlight:'}
+                </span>
+                <span className="hidden md:inline text-slate-500">
+                  {lang === 'ar'
+                    ? 'اختاري دورك للوصول لأهم أدواتك أولاً مع بقاء كل الأقسام مفتوحة'
+                    : 'Highlights your top tools while keeping every section visible'}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-white border border-slate-200 rounded-lg">
+                {(
+                  [
+                    ['all', lang === 'ar' ? 'عرض الكل' : 'All Sections'],
+                    ['teacher', lang === 'ar' ? 'أنا معلم' : 'Teacher'],
+                    ['parent', lang === 'ar' ? 'أنا ولي أمر' : 'Parent'],
+                    ['student', lang === 'ar' ? 'أنا طالب' : 'Student'],
+                  ] as const
+                ).map(([roleKey, roleLabel]) => (
+                  <button
+                    key={roleKey}
+                    type="button"
+                    onClick={() => handleSelectRole(roleKey)}
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                      visitorRole === roleKey
+                        ? 'bg-sky-900 text-white'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    {roleLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {visitorRole !== 'all' && (
+              <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-bold text-sky-900">
+                    {visitorRole === 'teacher'
+                      ? lang === 'ar'
+                        ? 'أقسام مقترحة للمعلم — مع بقاء كل باقي الأقسام متاحة بالأسفل'
+                        : 'Recommended for Teachers — all other sections remain open below'
+                      : visitorRole === 'parent'
+                      ? lang === 'ar'
+                        ? 'أقسام مقترحة لولي الأمر — مع بقاء كل باقي الأقسام متاحة بالأسفل'
+                        : 'Recommended for Parents — all other sections remain open below'
+                      : lang === 'ar'
+                      ? 'أقسام مقترحة للطالب — مع بقاء كل باقي الأقسام متاحة بالأسفل'
+                      : 'Recommended for Students — all other sections remain open below'}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {lang === 'ar'
+                      ? 'تقدرين التبديل بين المعلم وولي الأمر أو عرض الكل في أي وقت بضغطة واحدة.'
+                      : 'Switch between Teacher, Parent, Student, or View All anytime in one click.'}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {(visitorRole === 'teacher'
+                    ? [
+                        { id: 'teacher-studio', ar: '1. استوديو التحضير والفيسبوك', en: '1. Teacher Prep Studio' },
+                        { id: 'quiz-builder', ar: '2. بنك الأسئلة والكويزات', en: '2. Quiz Bank & Builder' },
+                        { id: 'grades', ar: '3. الصفوف والأوراق الرسمية', en: '3. Grades & Preps' },
+                      ]
+                    : visitorRole === 'parent'
+                    ? [
+                        { id: 'worksheet-library', ar: '1. حزم التأسيس المرقّمة', en: '1. Foundation Packs' },
+                        { id: 'stories', ar: '2. القصص الإنجليزية المصوّرة', en: '2. Illustrated Stories' },
+                        { id: 'certificates', ar: '3. شهادات تشجيع الأبناء', en: '3. Recognition Certificates' },
+                      ]
+                    : [
+                        { id: 'grades', ar: '1. تدريب صفك التفاعلي', en: '1. Grade Practice Quizzes' },
+                        { id: 'english-games', ar: '2. ألعاب الإنجليزي والنطق', en: '2. English & Phonics Games' },
+                        { id: 'iq-tests', ar: '3. تحديات الذكاء والبرمجة', en: '3. IQ & Coding Games' },
+                      ]
+                  ).map((shortcut) => (
+                    <button
+                      key={shortcut.id}
+                      type="button"
+                      onClick={() => scrollToTargetSection(shortcut.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 whitespace-nowrap shrink-0"
+                    >
+                      <span>{lang === 'ar' ? shortcut.ar : shortcut.en}</span>
+                      {lang === 'ar' ? <ArrowLeft className="w-3 h-3" /> : <ArrowRight className="w-3 h-3" />}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectRole('all')}
+                    className="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 whitespace-nowrap"
+                  >
+                    {lang === 'ar' ? 'إغلاق التوجيه' : 'Clear'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Mobile & Tablet Horizontal Quick-Jump Strip */}
-          <div className="lg:hidden w-full flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-slate-100">
+          <div className="lg:hidden w-full flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-slate-200/70">
             {[
-              { id: 'english-games', ar: 'ألعاب الإنجليزي مجاناً', en: 'English Games' },
-              { id: 'decision-lab', ar: 'صنّاع القرار مجاناً', en: 'Decision Lab' },
-              { id: 'iq-tests', ar: 'ذكاء مجاني بالشهادة', en: 'Free IQ' },
-              { id: 'coding-game', ar: 'برمجة مجانية بالشهادة', en: 'Free Coding' },
+              { id: 'classroom-gallery', ar: 'فصولنا', en: 'Classrooms' },
+              { id: 'grades', ar: 'الصفوف', en: 'Grades' },
+              { id: 'english-games', ar: 'ألعاب الإنجليزي', en: 'English Games' },
+              { id: 'quiz-builder', ar: 'بنك الكويزات', en: 'Quiz Bank' },
               { id: 'stories', ar: 'القصص', en: 'Stories' },
               { id: 'worksheet-library', ar: 'حزم الورق', en: 'Packs' },
-              { id: 'grades', ar: 'الصفوف', en: 'Grades' },
-              { id: 'quiz-builder', ar: 'بنك الكويزات', en: 'Quiz Bank' },
+              { id: 'iq-tests', ar: 'الذكاء', en: 'IQ Lab' },
+              { id: 'coding-game', ar: 'البرمجة', en: 'Coding' },
+              { id: 'decision-lab', ar: 'صنّاع القرار', en: 'Decision Lab' },
               { id: 'teacher-studio', ar: 'تحضير المعلم', en: 'Studio' },
             ].map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => scrollToTargetSection(item.id)}
-                className="px-3 py-1 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-sky-50 hover:text-sky-900 whitespace-nowrap shrink-0"
+                className="px-3 py-1 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:border-sky-800 hover:text-sky-900 whitespace-nowrap shrink-0"
               >
                 {lang === 'ar' ? item.ar : item.en}
               </button>
@@ -828,147 +1073,331 @@ export default function App() {
       </div>
 
       {/* Hero Split */}
-      <section className="py-12 sm:py-16 bg-white border-b border-slate-200">
+      <section className="py-10 sm:py-16 bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-            <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 leading-tight text-balance">
-                {labels.heroTitle}
-              </h1>
-              <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-2xl">
-                {labels.heroSubtitle}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <a
-                  href="#grades"
-                  className="px-6 py-3 text-sm font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 transition-colors whitespace-nowrap"
-                >
-                  {labels.heroPrimaryCta}
-                </a>
-                <a
-                  href="#teacher-studio"
-                  className="px-6 py-3 text-sm font-semibold text-slate-900 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 transition-colors whitespace-nowrap"
-                >
-                  {labels.heroSecondaryCta}
-                </a>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
+            <div className="lg:col-span-7 flex flex-col justify-between space-y-7">
+              <div className="space-y-4">
+                <p className="text-xs font-bold tracking-wide text-sky-900 uppercase">
+                  {lang === 'ar'
+                    ? 'للمدارس والمعلمين وأولياء الأمور في مصر'
+                    : 'Built for Teachers, Classrooms & Students'}
+                </p>
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 leading-[1.15] text-balance">
+                  {labels.heroTitle}
+                </h1>
+                <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-2xl">
+                  {labels.heroSubtitle}
+                </p>
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <a
+                    href="#grades"
+                    className="px-6 py-3 text-sm font-semibold text-white bg-sky-900 rounded-xl shadow-[0_3px_0_0_rgba(12,74,110,0.45)] hover:bg-sky-800 active:translate-y-px transition-all whitespace-nowrap"
+                  >
+                    {labels.heroPrimaryCta}
+                  </a>
+                  <a
+                    href="#teacher-studio"
+                    className="px-6 py-3 text-sm font-semibold text-slate-800 bg-white border border-slate-300 rounded-xl shadow-[0_2px_0_0_rgba(148,163,184,0.35)] hover:bg-slate-50 active:translate-y-px transition-all whitespace-nowrap"
+                  >
+                    {labels.heroSecondaryCta}
+                  </a>
+                </div>
               </div>
 
-              {/* Direct Free Highlight Shortcuts */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => scrollToTargetSection('english-games')}
-                  className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-start hover:bg-amber-100/80 transition-colors flex items-center gap-3"
-                >
-                  <Gamepad2 className="w-5 h-5 text-amber-700 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-amber-950 truncate">
-                      {lang === 'ar'
-                        ? 'ألعاب الإنجليزي (مجاني 100%)'
-                        : 'Free English Games'}
-                    </p>
-                    <p className="text-[11px] text-amber-800 truncate">
-                      {lang === 'ar'
-                        ? '3 مستويات للسن + صوت ومايك + شهادة PDF'
-                        : '3 age levels + mic coach + free PDF'}
-                    </p>
-                  </div>
-                </button>
+              {/* Editorial Hairline Learning Tracks Index (Clean non-boxed rhythm) */}
+              <div className="border border-slate-200 rounded-xl bg-slate-50/40 overflow-hidden">
+                <div className="px-4 py-2.5 bg-slate-100/70 border-b border-slate-200 flex items-center justify-between text-xs font-semibold text-slate-600">
+                  <span>
+                    {lang === 'ar' ? 'مسارات التعلّم المجانية بالمنصة' : 'Free Interactive Student Tracks'}
+                  </span>
+                  <span className="text-sky-900">
+                    {lang === 'ar' ? 'شهادات PDF فورية' : 'Includes PDF Certificates'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 divide-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => scrollToTargetSection('english-games')}
+                    className="p-3.5 text-start hover:bg-white transition-colors flex items-center justify-between gap-3 sm:border-b sm:border-e border-slate-200 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Gamepad2 className="w-4 h-4 text-amber-700 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate group-hover:text-sky-900">
+                          {lang === 'ar' ? 'ألعاب الإنجليزي والنطق' : 'English & Phonics Games'}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {lang === 'ar' ? '3 فئات عمرية · استماع ومايك' : 'Ages 5–14 · Voice coach'}
+                        </p>
+                      </div>
+                    </div>
+                    {lang === 'ar' ? (
+                      <ArrowLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    )}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => scrollToTargetSection('decision-lab')}
-                  className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-start hover:bg-indigo-100/80 transition-colors flex items-center gap-3"
-                >
-                  <Compass className="w-5 h-5 text-indigo-800 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-indigo-950 truncate">
-                      {lang === 'ar'
-                        ? 'مختبر صنّاع القرار والمبدعين (مجاني)'
-                        : 'Decision Makers & Creators Lab (Free)'}
-                    </p>
-                    <p className="text-[11px] text-indigo-800 truncate">
-                      {lang === 'ar'
-                        ? '3 أعمار · محاكاة قرار + روبوت + مهام برا الشاشة'
-                        : '3 age levels · Decisions, Bot Bugs & Safe Builds'}
-                    </p>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToTargetSection('decision-lab')}
+                    className="p-3.5 text-start hover:bg-white transition-colors flex items-center justify-between gap-3 sm:border-b border-slate-200 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Compass className="w-4 h-4 text-sky-900 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate group-hover:text-sky-900">
+                          {lang === 'ar' ? 'مختبر صنّاع القرار والمبدعين' : 'Decision & Creator Lab'}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {lang === 'ar' ? 'محاكاة مواقف + مهام برا الشاشة' : 'Scenarios & hands-on tasks'}
+                        </p>
+                      </div>
+                    </div>
+                    {lang === 'ar' ? (
+                      <ArrowLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    )}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => scrollToTargetSection('iq-tests')}
-                  className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-start hover:bg-emerald-100/80 transition-colors flex items-center gap-3"
-                >
-                  <Brain className="w-5 h-5 text-emerald-700 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-emerald-950 truncate">
-                      {lang === 'ar'
-                        ? 'اختبارات الذكاء والنفسية (مجاني)'
-                        : 'Free IQ & Psych Tests'}
-                    </p>
-                    <p className="text-[11px] text-emerald-800 truncate">
-                      {lang === 'ar'
-                        ? 'النتيجة الفورية + شهادة PDF مجاناً'
-                        : 'Instant score + free PDF certificate'}
-                    </p>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToTargetSection('iq-tests')}
+                    className="p-3.5 text-start hover:bg-white transition-colors flex items-center justify-between gap-3 sm:border-e border-slate-200 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Brain className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate group-hover:text-sky-900">
+                          {lang === 'ar' ? 'اختبارات الذكاء والنفسية' : 'IQ & Memory Assessments'}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {lang === 'ar' ? 'تقييم فوري وتحدي ذاكرة' : 'Instant cognitive report'}
+                        </p>
+                      </div>
+                    </div>
+                    {lang === 'ar' ? (
+                      <ArrowLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    )}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => scrollToTargetSection('coding-game')}
-                  className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-start hover:bg-sky-100/80 transition-colors flex items-center gap-3"
-                >
-                  <Code2 className="w-5 h-5 text-sky-900 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-sky-950 truncate">
-                      {lang === 'ar'
-                        ? 'ألعاب البرمجة للأطفال (مجاني)'
-                        : 'Free Kids Coding Games'}
-                    </p>
-                    <p className="text-[11px] text-sky-800 truncate">
-                      {lang === 'ar'
-                        ? 'تعلّم بالإنجليزية + شهادة PDF مجاناً'
-                        : 'Learn in English + free PDF certificate'}
-                    </p>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToTargetSection('coding-game')}
+                    className="p-3.5 text-start hover:bg-white transition-colors flex items-center justify-between gap-3 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Code2 className="w-4 h-4 text-slate-800 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate group-hover:text-sky-900">
+                          {lang === 'ar' ? 'مغامرة البرمجة للأطفال' : 'Kids English Coding Quest'}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {lang === 'ar' ? 'تعلّم المنطق والأوامر بالإنجليزي' : 'Interactive logic puzzles'}
+                        </p>
+                      </div>
+                    </div>
+                    {lang === 'ar' ? (
+                      <ArrowLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-900 shrink-0" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="lg:col-span-5">
-              <div className="h-64 sm:h-80 lg:h-full rounded-2xl overflow-hidden border border-slate-200 bg-gradient-to-br from-sky-900 to-slate-800">
-                <img
-                  src={HERO_BANNER_IMAGE}
-                  alt={labels.heroTitle}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
-              </div>
+            <div className="lg:col-span-5 flex flex-col">
+              <figure className="h-full flex flex-col rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
+                <div className="aspect-[4/3] lg:flex-1 bg-gradient-to-br from-sky-900 to-slate-800 overflow-hidden">
+                  <img
+                    src={HERO_BANNER_IMAGE}
+                    alt={
+                      lang === 'ar'
+                        ? 'تلاميذ مصريون يشاركون بحماس في حصة اللغة الإنجليزية داخل الفصل الدراسي'
+                        : 'Egyptian students actively participating in an English classroom lesson'
+                    }
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover object-center"
+                  />
+                </div>
+                <figcaption className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-600">
+                  <span className="font-medium text-slate-800">
+                    {lang === 'ar'
+                      ? 'تطبيق عملي داخل الفصول: تأسيس، ابتدائي، وإعدادي'
+                      : 'Real classroom engagement across Primary & Prep grades'}
+                  </span>
+                  <span className="font-mono-num text-[11px] text-slate-500 shrink-0">
+                    {GRADES.length} {labels.statGrades}
+                  </span>
+                </figcaption>
+              </figure>
             </div>
           </div>
 
-          {/* 4-Column Metric Strip */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-slate-200">
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+          {/* Architectural Hairline Stat Ledger */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x rtl:lg:divide-x-reverse divide-slate-200 border border-slate-200 rounded-xl bg-slate-50/70">
+            <div className="px-5 py-4">
               <p className="text-2xl font-bold text-slate-900 font-mono-num">{GRADES.length}</p>
               <p className="text-xs font-medium text-slate-600 mt-1">{labels.statGrades}</p>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="px-5 py-4">
               <p className="text-2xl font-bold text-slate-900 font-mono-num">{resources.length}</p>
               <p className="text-xs font-medium text-slate-600 mt-1">{labels.statPreps}</p>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="px-5 py-4">
               <p className="text-2xl font-bold text-slate-900 font-mono-num">{stories.length}</p>
               <p className="text-xs font-medium text-slate-600 mt-1">{labels.statStories}</p>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="px-5 py-4">
               <p className="text-2xl font-bold text-amber-700 font-mono-num">
                 {settings.aiCertificatePriceEgp} {labels.egp}
               </p>
               <p className="text-xs font-medium text-slate-600 mt-1">{labels.statCerts}</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Real Students in Classrooms Gallery */}
+      <section id="classroom-gallery" className="py-12 sm:py-16 bg-slate-50 border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="max-w-2xl space-y-2">
+              <p className="text-xs font-bold tracking-wide text-sky-900 uppercase">
+                {lang === 'ar' ? 'من داخل فصولنا' : 'Inside Our Classrooms'}
+              </p>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 text-balance">
+                {lang === 'ar'
+                  ? 'تلاميذ حقيقيون يتعلّمون الإنجليزية خطوة بخطوة'
+                  : 'Real Students Practicing English Step by Step'}
+              </h2>
+            </div>
+            <p className="text-sm text-slate-600 max-w-md leading-relaxed">
+              {lang === 'ar'
+                ? 'من حصص الصوتيات للأطفال وحتى اختبارات التابلت وشهادات التفوق المدرسية، كل أداة في المنصة مصممة لواقع الفصل المصري.'
+                : 'From phonics flashcards for early learners to digital tablet quizzes and printed recognition awards.'}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
+            <article className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
+              <div className="aspect-[4/3] bg-slate-200 overflow-hidden">
+                <img
+                  src={CLASSROOM_PHONICS_IMAGE}
+                  alt={
+                    lang === 'ar'
+                      ? 'أطفال المرحلة الابتدائية يرتبون بطاقات الصوتيات الإنجليزية مع المعلمة'
+                      : 'Primary students sorting English phonics flashcards with their teacher'
+                  }
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-300"
+                />
+              </div>
+              <div className="p-5 flex-1 flex flex-col justify-between gap-4">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-amber-700">
+                    {lang === 'ar' ? 'تأسيس وروضة · 5–8 سنوات' : 'Early Phonics · Ages 5–8'}
+                  </p>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {lang === 'ar' ? 'بطاقات الصوتيات وبناء الكلمات' : 'Hands-on Phonics & Word Building'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'أنشطة جماعية وحزم أوراق عمل مرقّمة لتثبيت الحروف والأصوات داخل الفصل والمنزل.'
+                      : 'Printable packs and guided sound-matching activities for small groups and home study.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('worksheet-library')}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-900 hover:underline underline-offset-4 self-start"
+                >
+                  <span>{lang === 'ar' ? 'تصفح حزم التأسيس' : 'Browse Foundation Packs'}</span>
+                  {lang === 'ar' ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </article>
+
+            <article className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
+              <div className="aspect-[4/3] bg-slate-200 overflow-hidden">
+                <img
+                  src={STUDENT_TABLET_IMAGE}
+                  alt={
+                    lang === 'ar'
+                      ? 'طالب في المرحلة الإعدادية يحل اختبار إنجليزي تفاعلي على التابلت'
+                      : 'Middle school student practicing an interactive English quiz on a tablet'
+                  }
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-300"
+                />
+              </div>
+              <div className="p-5 flex-1 flex flex-col justify-between gap-4">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-sky-900">
+                    {lang === 'ar' ? 'ابتدائي وإعدادي · بنك الأسئلة' : 'Primary & Prep · Interactive Quizzes'}
+                  </p>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {lang === 'ar' ? 'تدريب إلكتروني فوري بالتابلت والهاتف' : 'Self-Grading Tablet Practice'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'أسئلة قواعد ومفردات مرتبطة بوحدات المنهج مع نطق صوتي وتصحيح تلقائي للدرجات.'
+                      : 'Curriculum-aligned grammar and vocabulary drills with audio playback and instant scoring.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('grades')}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-900 hover:underline underline-offset-4 self-start"
+                >
+                  <span>{lang === 'ar' ? 'جرّب أسئلة صفك الآن' : 'Practice Grade Quizzes'}</span>
+                  {lang === 'ar' ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </article>
+
+            <article className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
+              <div className="aspect-[4/3] bg-slate-200 overflow-hidden">
+                <img
+                  src={STUDENT_AWARD_IMAGE}
+                  alt={
+                    lang === 'ar'
+                      ? 'تلميذة متفوقة تحمل شهادة تقدير باللغة الإنجليزية بجانب معلمتها'
+                      : 'Proud student holding her printed English excellence certificate beside her teacher'
+                  }
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-300"
+                />
+              </div>
+              <div className="p-5 flex-1 flex flex-col justify-between gap-4">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-emerald-700">
+                    {lang === 'ar' ? 'تكريم الطلاب · شهادات فورية' : 'Student Recognition · Printable Awards'}
+                  </p>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {lang === 'ar' ? 'شهادات تفوق تشجع كل متعلّم' : 'Personalized Certificates That Inspire'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'شهادات مجانية عند إتمام الألعاب والاختبارات، أو استوديو تصميم احترافي بصورة الطالب للطباعة.'
+                      : 'Earn instant free certificates in games or craft a custom photo certificate ready to print.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => scrollToTargetSection('certificates')}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-900 hover:underline underline-offset-4 self-start"
+                >
+                  <span>{lang === 'ar' ? 'افتح استوديو الشهادات' : 'Open Certificate Studio'}</span>
+                  {lang === 'ar' ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </article>
           </div>
         </div>
       </section>
@@ -1089,7 +1518,7 @@ export default function App() {
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-900">
-                  <Sparkles className="w-4 h-4" />
+                  <GraduationCap className="w-4 h-4" />
                   <span>
                     {lang === 'ar'
                       ? 'الأسئلة التفاعلية المرتبطة بمنهج الصف (مجاناً)'
@@ -1231,7 +1660,7 @@ export default function App() {
                     </div>
 
                     <div className="space-y-2.5 pt-4 border-t border-slate-100">
-                      {!item.isPaid ? (
+                      {!item.isPaid || isItemUnlocked(unlockedState, item.id) ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -1245,17 +1674,30 @@ export default function App() {
                                 externalUrl: item.externalUrl,
                                 brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
                                 logoDataUrl: settings.logoDataUrl,
+                                analyticsSection: 'grades',
+                                analyticsItemId: item.id,
+                                analyticsLang: lang,
                               })
                             }
                             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-700 rounded-xl hover:bg-emerald-600 transition-colors whitespace-nowrap"
                           >
-                            <Download className="w-4 h-4" />
-                            <span>{labels.downloadBtn}</span>
+                            {item.isPaid ? (
+                              <CheckCircle2 className="w-4 h-4" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                            <span>
+                              {item.isPaid
+                                ? lang === 'ar'
+                                  ? 'مفعّل بكود — تحميل الآن'
+                                  : 'Unlocked — Download'
+                                : labels.downloadBtn}
+                            </span>
                           </button>
                           {item.isInteractive && (
                             <button
                               type="button"
-                              onClick={() => setActiveQuiz(item)}
+                              onClick={() => openInteractiveResource(item)}
                               className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 whitespace-nowrap"
                             >
                               <Play className="w-3.5 h-3.5" />
@@ -1268,7 +1710,7 @@ export default function App() {
                           {item.isInteractive && (
                             <button
                               type="button"
-                              onClick={() => setActiveQuiz(item)}
+                              onClick={() => openInteractiveResource(item)}
                               className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 transition-colors whitespace-nowrap"
                             >
                               <Play className="w-3.5 h-3.5" />
@@ -1287,6 +1729,8 @@ export default function App() {
                                     : 'activity',
                                 itemTitle: lang === 'ar' ? item.titleAr : item.titleEn,
                                 amountEgp: item.priceEgp,
+                                targetType: 'resource',
+                                targetId: item.id,
                               })
                             }
                             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 transition-colors whitespace-nowrap"
@@ -1336,6 +1780,7 @@ export default function App() {
         items={packItems}
         settings={settings}
         isAdmin={isAdmin}
+        unlockedState={unlockedState}
         onOpenAdminPacks={() => {
           setAdminInitialTab('packs');
           setAdminOpen(true);
@@ -1411,21 +1856,48 @@ export default function App() {
                         <BookOpen className="w-3.5 h-3.5" />
                         <span>{labels.readExcerpt}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPaymentIntent({
-                            itemType: 'story',
-                            itemTitle: lang === 'ar' ? story.titleAr : story.titleEn,
-                            amountEgp: story.priceEgp,
-                          })
-                        }
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap"
-                      >
-                        <span>
-                          {labels.unlockStory} · {story.priceEgp} {labels.egp}
-                        </span>
-                      </button>
+                      {isItemUnlocked(unlockedState, story.id) ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadTextOrHtmlFile({
+                              fileName: story.fileName || `${story.id}.html`,
+                              title: lang === 'ar' ? story.titleAr : story.titleEn,
+                              subtitle: story.levelLabel,
+                              bodyText: story.previewExcerpt,
+                              fileDataUrl: story.fileDataUrl,
+                              externalUrl: story.externalUrl,
+                              brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
+                              logoDataUrl: settings.logoDataUrl,
+                              analyticsSection: 'stories',
+                              analyticsItemId: story.id,
+                              analyticsLang: lang,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 rounded-xl hover:bg-emerald-600 whitespace-nowrap"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'مفعّلة — تحميل القصة' : 'Unlocked — Download Story'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaymentIntent({
+                              itemType: 'story',
+                              itemTitle: lang === 'ar' ? story.titleAr : story.titleEn,
+                              amountEgp: story.priceEgp,
+                              targetType: 'story',
+                              targetId: story.id,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap"
+                        >
+                          <span>
+                            {labels.unlockStory} · {story.priceEgp} {labels.egp}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </article>
@@ -1583,6 +2055,9 @@ export default function App() {
                           externalUrl: paper.externalUrl,
                           brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
                           logoDataUrl: settings.logoDataUrl,
+                          analyticsSection: 'papers',
+                          analyticsItemId: paper.id,
+                          analyticsLang: lang,
                         })
                       }
                       className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap shrink-0"
@@ -1630,43 +2105,44 @@ export default function App() {
         </div>
       </section>
 
-      {/* Quick Platform Directory (Helps direct-link visitors explore the rest of the site) */}
+      {/* Editorial Platform Index */}
       <section className="py-10 bg-slate-100 border-t border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="space-y-1">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-600" />
+              <BookOpen className="w-4 h-4 text-sky-900" />
               <span>
                 {lang === 'ar'
-                  ? 'استكشف باقي أقسام المنصة المجانية والمدفوعة:'
-                  : 'Explore More Sections Across the Platform:'}
+                  ? 'دليل أقسام المنصة السريع:'
+                  : 'Platform Section Directory:'}
               </span>
             </h3>
             <p className="text-xs text-slate-600">
               {lang === 'ar'
-                ? 'انتقل مباشرة لأي قسم من هنا لتجربة الأدوات المجانية أو تصفح الكتب والمناهج.'
-                : 'Jump cleanly to any free learning game, IQ assessment, story library, or teacher tool.'}
+                ? 'انتقل مباشرة إلى أي قسم تعليمي أو تدريبي في الأكاديمية.'
+                : 'Jump directly to any curriculum resource, interactive lab, or teacher studio.'}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {[
-              { id: 'english-games', ar: 'ألعاب الإنجليزي (مجاني بالشهادة)', en: 'Free English Games' },
-              { id: 'decision-lab', ar: 'صنّاع القرار والمبدعين (مجاني)', en: 'Free Decision Lab' },
-              { id: 'iq-tests', ar: 'اختبارات الذكاء (مجاني بالشهادة)', en: 'Free IQ & Psych Lab' },
-              { id: 'coding-game', ar: 'ألعاب البرمجة (مجاني بالشهادة)', en: 'Free Kids Coding' },
-              { id: 'stories', ar: 'القصص الإنجليزية', en: 'Stories' },
-              { id: 'worksheet-library', ar: 'حزم أوراق العمل', en: 'Worksheet Packs' },
+              { id: 'classroom-gallery', ar: 'من داخل فصولنا', en: 'Classrooms' },
               { id: 'grades', ar: 'الصفوف والتحضير', en: 'Grades & Preps' },
+              { id: 'worksheet-library', ar: 'حزم أوراق العمل', en: 'Worksheet Packs' },
               { id: 'quiz-builder', ar: 'بنك الأسئلة والكويزات', en: 'Quiz Bank' },
-              { id: 'certificates', ar: 'شهادات الذكاء الاصطناعي', en: 'AI Certificates' },
+              { id: 'english-games', ar: 'ألعاب الإنجليزي', en: 'English Games' },
+              { id: 'decision-lab', ar: 'صنّاع القرار والمبدعين', en: 'Decision Lab' },
+              { id: 'iq-tests', ar: 'اختبارات الذكاء', en: 'IQ & Psych Lab' },
+              { id: 'coding-game', ar: 'برمجة للأطفال', en: 'Kids Coding' },
+              { id: 'stories', ar: 'القصص الإنجليزية', en: 'Stories' },
+              { id: 'certificates', ar: 'استوديو الشهادات', en: 'Certificates' },
               { id: 'teacher-studio', ar: 'استوديو المعلم', en: 'Teacher Studio' },
             ].map((sec) => (
               <button
                 key={sec.id}
                 type="button"
                 onClick={() => scrollToTargetSection(sec.id)}
-                className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg hover:border-sky-800 hover:text-sky-900 transition-colors whitespace-nowrap"
+                className="text-xs font-semibold text-slate-700 hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap"
               >
                 {lang === 'ar' ? sec.ar : sec.en}
               </button>
@@ -1708,6 +2184,74 @@ export default function App() {
         </div>
       </footer>
 
+      {/* Standalone Activation Code Redemption Modal */}
+      {codeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 sm:p-7 space-y-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-sky-900">
+                  <KeyRound className="w-4 h-4" />
+                  <span>{lang === 'ar' ? 'تفعيل المحتوى بكود' : 'Redeem Activation Code'}</span>
+                </div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  {lang === 'ar' ? 'أدخل كود التفعيل المرسل لك عبر واتساب' : 'Enter your WhatsApp Activation Code'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCodeModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRedeemStandaloneCode} className="space-y-3">
+              <input
+                type="text"
+                dir="ltr"
+                value={codeModalInput}
+                onChange={(e) => setCodeModalInput(e.target.value.toUpperCase())}
+                placeholder="LC-XXXX-XXXX"
+                className="w-full px-4 py-3 text-sm font-mono font-bold tracking-wider uppercase border border-slate-300 rounded-xl focus:outline-none focus:border-sky-800"
+              />
+              <button
+                type="submit"
+                disabled={codeModalBusy || !codeModalInput.trim()}
+                className="w-full py-2.5 text-sm font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 disabled:opacity-60 transition-colors"
+              >
+                {codeModalBusy
+                  ? lang === 'ar'
+                    ? 'جاري التحقق من الكود...'
+                    : 'Verifying code...'
+                  : lang === 'ar'
+                  ? 'تفعيل وفتح الملف الآن'
+                  : 'Activate & Unlock Now'}
+              </button>
+            </form>
+
+            {codeModalFeedback && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold ${
+                  codeModalFeedback.ok
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
+                }`}
+              >
+                {codeModalFeedback.text}
+              </div>
+            )}
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              {lang === 'ar'
+                ? 'بمجرد التفعيل يُفتح الملف أو الحزمة أو القصة مباشرة على جهازك بدون الحاجة لتسجيل دخول.'
+                : 'Once activated, the resource, pack, or story unlocks immediately on this browser.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Story Excerpt Modal */}
       {excerptStory && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1745,21 +2289,50 @@ export default function App() {
               >
                 {labels.closeBtn}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const chosen = excerptStory;
-                  setExcerptStory(null);
-                  setPaymentIntent({
-                    itemType: 'story',
-                    itemTitle: lang === 'ar' ? chosen.titleAr : chosen.titleEn,
-                    amountEgp: chosen.priceEgp,
-                  });
-                }}
-                className="px-4 py-2 text-xs font-semibold text-white bg-sky-900 rounded-lg hover:bg-sky-800"
-              >
-                {labels.unlockStory} · {excerptStory.priceEgp} {labels.egp}
-              </button>
+              {isItemUnlocked(unlockedState, excerptStory.id) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const chosen = excerptStory;
+                    setExcerptStory(null);
+                    downloadTextOrHtmlFile({
+                      fileName: chosen.fileName || `${chosen.id}.html`,
+                      title: lang === 'ar' ? chosen.titleAr : chosen.titleEn,
+                      subtitle: chosen.levelLabel,
+                      bodyText: chosen.previewExcerpt,
+                      fileDataUrl: chosen.fileDataUrl,
+                      externalUrl: chosen.externalUrl,
+                      brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
+                      logoDataUrl: settings.logoDataUrl,
+                      analyticsSection: 'stories',
+                      analyticsItemId: chosen.id,
+                      analyticsLang: lang,
+                    });
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 rounded-lg hover:bg-emerald-600"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'مفعّلة — تحميل القصة' : 'Unlocked — Download Story'}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const chosen = excerptStory;
+                    setExcerptStory(null);
+                    setPaymentIntent({
+                      itemType: 'story',
+                      itemTitle: lang === 'ar' ? chosen.titleAr : chosen.titleEn,
+                      amountEgp: chosen.priceEgp,
+                      targetType: 'story',
+                      targetId: chosen.id,
+                    });
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-sky-900 rounded-lg hover:bg-sky-800"
+                >
+                  {labels.unlockStory} · {excerptStory.priceEgp} {labels.egp}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1779,6 +2352,8 @@ export default function App() {
             itemType: 'activity',
             itemTitle: lang === 'ar' ? res.titleAr : res.titleEn,
             amountEgp: res.priceEgp,
+            targetType: 'resource',
+            targetId: res.id,
           })
         }
       />
@@ -1789,6 +2364,7 @@ export default function App() {
         settings={settings}
         lang={lang}
         user={user}
+        onUnlockedSuccess={(nextState) => setUnlockedState(nextState)}
         onClose={() => setPaymentIntent(null)}
       />
 
@@ -1806,6 +2382,8 @@ export default function App() {
         courses={courses}
         questionBank={questionBank}
         subscriptions={adminSubscriptions}
+        activationCodes={activationCodes}
+        analyticsEvents={analyticsEvents}
         hasCloudPacks={cloudPacks.length > 0}
         hasCloudCourses={cloudCourses.length > 0}
         hasCloudQuestionBank={cloudQuestionBank.length > 0}

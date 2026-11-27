@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Download, FolderOpen, Lock, SlidersHorizontal, Stamp, X } from 'lucide-react';
+import { CheckCircle2, Download, FolderOpen, Lock, SlidersHorizontal, Stamp, X } from 'lucide-react';
 import { t } from '../i18n';
 import { downloadTextOrHtmlFile } from '../utils/download';
+import { isItemUnlocked, type UnlockedState } from '../utils/analyticsAndUnlock';
 import type {
   AcademySettings,
   Lang,
@@ -18,6 +19,7 @@ interface WorksheetPacksSectionProps {
   items: WorksheetPackItem[];
   settings: AcademySettings;
   isAdmin: boolean;
+  unlockedState: UnlockedState;
   onOpenAdminPacks: () => void;
   onRequestPayment: (intent: PaymentIntent) => void;
 }
@@ -28,6 +30,7 @@ export function WorksheetPacksSection({
   items,
   settings,
   isAdmin,
+  unlockedState,
   onOpenAdminPacks,
   onRequestPayment,
 }: WorksheetPacksSectionProps) {
@@ -223,24 +226,33 @@ export function WorksheetPacksSection({
                       </button>
 
                       {pack.isPaid && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onRequestPayment({
-                              itemType: 'worksheet_pack',
-                              itemTitle: `${labels.packNumberPrefix} ${formattedNumber}: ${
-                                lang === 'ar' ? pack.titleAr : pack.titleEn
-                              }`,
-                              amountEgp: pack.priceEgp,
-                            })
-                          }
-                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-amber-950 bg-amber-100 border border-amber-300 rounded-xl hover:bg-amber-200 transition-colors whitespace-nowrap"
-                        >
-                          <Lock className="w-3.5 h-3.5" />
-                          <span>
-                            {pack.priceEgp} {labels.egp}
+                        isItemUnlocked(unlockedState, pack.id) ? (
+                          <span className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-800 bg-emerald-100 border border-emerald-300 rounded-xl whitespace-nowrap">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{lang === 'ar' ? 'مفعّلة بكود' : 'Unlocked'}</span>
                           </span>
-                        </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onRequestPayment({
+                                itemType: 'worksheet_pack',
+                                targetType: 'pack',
+                                targetId: pack.id,
+                                itemTitle: `${labels.packNumberPrefix} ${formattedNumber}: ${
+                                  lang === 'ar' ? pack.titleAr : pack.titleEn
+                                }`,
+                                amountEgp: pack.priceEgp,
+                              })
+                            }
+                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-amber-950 bg-amber-100 border border-amber-300 rounded-xl hover:bg-amber-200 transition-colors whitespace-nowrap"
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>
+                              {pack.priceEgp} {labels.egp}
+                            </span>
+                          </button>
+                        )
                       )}
                     </div>
 
@@ -309,7 +321,8 @@ export function WorksheetPacksSection({
             ) : (
               <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
                 {activePackItems.map((sheet) => {
-                  const canDownloadFree = !activePack.isPaid || sheet.isFreeSample;
+                  const isPackUnlocked = isItemUnlocked(unlockedState, activePack.id);
+                  const canDownloadFree = !activePack.isPaid || sheet.isFreeSample || isPackUnlocked;
                   const kindText =
                     sheet.kind === 'worksheet' ? labels.catWorksheet : labels.catActivity;
 
@@ -354,6 +367,9 @@ export function WorksheetPacksSection({
                               externalUrl: sheet.externalUrl,
                               brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
                               logoDataUrl: settings.logoDataUrl,
+                              analyticsSection: 'packs',
+                              analyticsItemId: sheet.id,
+                              analyticsLang: lang,
                             })
                           }
                           className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 rounded-lg hover:bg-emerald-600 transition-colors whitespace-nowrap shrink-0"
@@ -369,6 +385,8 @@ export function WorksheetPacksSection({
                             setActivePack(null);
                             onRequestPayment({
                               itemType: 'worksheet_pack',
+                              targetType: 'pack',
+                              targetId: packToBuy.id,
                               itemTitle: `${labels.packNumberPrefix} ${String(
                                 packToBuy.packNumber
                               ).padStart(2, '0')}: ${
@@ -400,7 +418,7 @@ export function WorksheetPacksSection({
                 {labels.closeBtn}
               </button>
 
-              {activePack.isPaid && (
+              {activePack.isPaid && !isItemUnlocked(unlockedState, activePack.id) && (
                 <button
                   type="button"
                   onClick={() => {
@@ -408,6 +426,8 @@ export function WorksheetPacksSection({
                     setActivePack(null);
                     onRequestPayment({
                       itemType: 'worksheet_pack',
+                      targetType: 'pack',
+                      targetId: packToBuy.id,
                       itemTitle: `${labels.packNumberPrefix} ${String(
                         packToBuy.packNumber
                       ).padStart(2, '0')}: ${

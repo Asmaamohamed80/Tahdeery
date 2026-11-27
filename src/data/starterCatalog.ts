@@ -23,7 +23,10 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   seeded: false,
 };
 
-export const HERO_BANNER_IMAGE = '/src/assets/images/hero_english_academy_1794935738831.jpg';
+export const HERO_BANNER_IMAGE = '/src/assets/images/classroom_hero_students_1795788392619.jpg';
+export const CLASSROOM_PHONICS_IMAGE = '/src/assets/images/kids_phonics_table_1795788393497.jpg';
+export const STUDENT_TABLET_IMAGE = '/src/assets/images/student_tablet_reading_1795788393787.jpg';
+export const STUDENT_AWARD_IMAGE = '/src/assets/images/student_award_certificate_1795788393716.jpg';
 export const CERTIFICATE_SEAL_IMAGE = '/src/assets/images/certificate_royal_seal_1794935739611.jpg';
 export const STORY_COVER_1 = '/src/assets/images/story_magical_library_1794935738366.jpg';
 export const STORY_COVER_2 = '/src/assets/images/story_adventure_island_1794935739624.jpg';

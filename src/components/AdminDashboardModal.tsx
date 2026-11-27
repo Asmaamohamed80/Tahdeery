@@ -1,5 +1,21 @@
 import { useEffect, useState } from 'react';
-import { Check, Download, Link2, LogOut, Plus, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import {
+  BarChart3,
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  Eye,
+  FileText,
+  KeyRound,
+  Link2,
+  LogOut,
+  Plus,
+  Trash2,
+  Upload,
+  Wand2,
+  X,
+} from 'lucide-react';
 import {
   addDoc,
   collection,
@@ -15,7 +31,9 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   GRADES,
   type AcademySettings,
+  type ActivationCode,
   type AffiliateCourse,
+  type AnalyticsEvent,
   type CourseTrack,
   type GradeResource,
   type Lang,
@@ -36,6 +54,13 @@ import {
   STORY_COVER_1,
   STORY_COVER_2,
 } from '../data/starterCatalog';
+import {
+  chunkRawText,
+  parseStructuredMcqsLocally,
+  splitPdfIntoBase64Chunks,
+  type PdfChunkPayload,
+} from '../utils/questionBankImporter';
+import { generateRandomActivationCode } from '../utils/analyticsAndUnlock';
 import { t } from '../i18n';
 
 export type AdminTab =
@@ -46,6 +71,8 @@ export type AdminTab =
   | 'stories'
   | 'papers'
   | 'news'
+  | 'codes'
+  | 'analytics'
   | 'links'
   | 'settings'
   | 'orders';
@@ -63,6 +90,8 @@ interface AdminDashboardModalProps {
   courses: AffiliateCourse[];
   questionBank: QuestionBankItem[];
   subscriptions: TeacherSubscription[];
+  activationCodes: ActivationCode[];
+  analyticsEvents: AnalyticsEvent[];
   hasCloudPacks: boolean;
   hasCloudCourses: boolean;
   hasCloudQuestionBank: boolean;
@@ -93,6 +122,8 @@ export function AdminDashboardModal({
   courses,
   questionBank,
   subscriptions,
+  activationCodes,
+  analyticsEvents,
   hasCloudPacks,
   hasCloudCourses,
   hasCloudQuestionBank,
@@ -203,9 +234,13 @@ export function AdminDashboardModal({
   const [qbExplanation, setQbExplanation] = useState('');
 
   const [importPdfName, setImportPdfName] = useState('');
-  const [importPdfBase64, setImportPdfBase64] = useState('');
+  const [importPdfChunks, setImportPdfChunks] = useState<PdfChunkPayload[]>([]);
+  const [importPdfTotalPages, setImportPdfTotalPages] = useState(0);
+  const [importPdfSizeMb, setImportPdfSizeMb] = useState('');
+  const [importPreparing, setImportPreparing] = useState(false);
   const [importRawText, setImportRawText] = useState('');
   const [extractingBank, setExtractingBank] = useState(false);
+  const [extractProgress, setExtractProgress] = useState('');
   const [extractedPreview, setExtractedPreview] = useState<
     Array<{
       unitLabel: string;
@@ -216,10 +251,25 @@ export function AdminDashboardModal({
     }>
   >([]);
 
+  const [previewFile, setPreviewFile] = useState<{
+    title: string;
+    fileName?: string;
+    fileDataUrl?: string;
+    externalUrl?: string;
+    contentText?: string;
+  } | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState('');
+
   const [subUidInput, setSubUidInput] = useState('');
   const [subNameInput, setSubNameInput] = useState('');
   const [subEmailInput, setSubEmailInput] = useState('');
   const [subTermInput, setSubTermInput] = useState('2026 Term 1');
+
+  // Activation codes form state
+  const [codeTargetSelection, setCodeTargetSelection] = useState('all_paid:all');
+  const [codeMaxUses, setCodeMaxUses] = useState(1);
+  const [codeNote, setCodeNote] = useState('');
+  const [lastCreatedCode, setLastCreatedCode] = useState('');
 
   // Worksheet Pack & Bulk Sheet upload form state
   const [packNumber, setPackNumber] = useState(packs.length + 1);
@@ -263,7 +313,44 @@ export function AdminDashboardModal({
     );
   }, [packs, targetPackId]);
 
+  useEffect(() => {
+    if (!previewFile?.fileDataUrl || previewFile.fileDataUrl.startsWith('data:image/')) {
+      setPreviewBlobUrl('');
+      return;
+    }
+    try {
+      const dataUrl = previewFile.fileDataUrl;
+      const commaIdx = dataUrl.indexOf(',');
+      if (commaIdx === -1) {
+        setPreviewBlobUrl('');
+        return;
+      }
+      const header = dataUrl.slice(0, commaIdx);
+      const base64 = dataUrl.slice(commaIdx + 1);
+      const mimeMatch = header.match(/data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: mime });
+      const url = URL.createObjectURL(blob);
+      setPreviewBlobUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } catch {
+      setPreviewBlobUrl('');
+    }
+  }, [previewFile]);
+
   if (!open) return null;
+
+  const formatDataUrlKb = (dataUrl: string): string => {
+    if (!dataUrl) return '';
+    const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    const kb = Math.max(1, Math.round((base64.length * 0.75) / 1024));
+    return `${kb} KB`;
+  };
 
   const MAX_DIRECT_FILE_BYTES = 650 * 1024;
 
@@ -815,57 +902,122 @@ export function AdminDashboardModal({
     }
   };
 
-  const handlePdfBankFileChange = (file: File | undefined) => {
+  const handlePdfBankFileChange = async (file: File | undefined) => {
     if (!file) return;
-    if (file.type && file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setFeedback(
-        lang === 'ar' ? 'يرجى اختيار ملف بصيغة PDF فقط.' : 'Please select a PDF file.'
-      );
-      return;
-    }
-    if (file.size > 3 * 1024 * 1024) {
-      setFeedback(
-        lang === 'ar'
-          ? 'حجم ملف الـ PDF كبير (أكثر من 3 ميجا). يمكنكِ تقسيمه أو نسخ الأسئلة منه ولصقها في الخانة بالأسفل.'
-          : 'PDF is larger than 3MB. Split it into smaller parts or paste the text directly below.'
-      );
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || '');
-      const base64 = result.includes(',') ? result.split(',')[1] : result;
-      setImportPdfName(file.name);
-      setImportPdfBase64(base64);
-      setFeedback('');
-    };
-    reader.readAsDataURL(file);
-  };
+    const lower = file.name.toLowerCase();
 
-  const handleExtractQuestionsFromPdf = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!importPdfBase64 && !importRawText.trim()) {
+    // Support plain text / JSON / CSV question files directly
+    if (lower.endsWith('.txt') || lower.endsWith('.json') || lower.endsWith('.csv')) {
+      try {
+        const text = await file.text();
+        setImportRawText(text);
+        setImportPdfName('');
+        setImportPdfChunks([]);
+        setImportPdfTotalPages(0);
+        setImportPdfSizeMb('');
+        const localParsed = parseStructuredMcqsLocally(text, qbUnitLabel.trim() || 'General');
+        if (localParsed.length > 0) {
+          setExtractedPreview(localParsed);
+          setFeedback(
+            lang === 'ar'
+              ? `تم قراءة الملف النصي واستخراج ${localParsed.length} سؤال مباشرة! راجعيها بالأسفل ثم اضغطي حفظ.`
+              : `Parsed ${localParsed.length} questions from file directly!`
+          );
+        } else {
+          setFeedback(
+            lang === 'ar'
+              ? 'تم تحميل نص الملف في المربع بالأسفل — اضغطي استخراج بالذكاء الاصطناعي.'
+              : 'File text loaded below — click Extract to parse questions.'
+          );
+        }
+      } catch {
+        setFeedback(lang === 'ar' ? 'تعذر قراءة الملف النصي.' : 'Failed to read text file.');
+      }
+      return;
+    }
+
+    if (file.type && file.type !== 'application/pdf' && !lower.endsWith('.pdf')) {
       setFeedback(
         lang === 'ar'
-          ? 'ارفع ملف PDF أولاً أو الصق نص الأسئلة للاستخراج.'
-          : 'Attach a PDF file or paste question text first.'
+          ? 'يرجى اختيار ملف PDF أو ملف نصي (.txt / .json).'
+          : 'Please select a PDF or text (.txt / .json) file.'
       );
       return;
     }
-    setExtractingBank(true);
+
+    setImportPreparing(true);
     setFeedback('');
     try {
-      const gradeMeta = GRADES.find((g) => g.id === qbGradeId);
+      const { totalPages, chunks, skippedOversizedPages } = await splitPdfIntoBase64Chunks(file);
+      if (chunks.length === 0) {
+        setFeedback(
+          lang === 'ar'
+            ? 'صفحات هذا الملف كبيرة جداً كصور عالية الدقة. جرّبي ضغطه أو نسخ النص منه في المربع بالأسفل.'
+            : 'PDF pages are too large as raw scans. Try compressing or pasting text below.'
+        );
+        return;
+      }
+      const mbStr = (file.size / (1024 * 1024)).toFixed(1);
+      setImportPdfName(file.name);
+      setImportPdfChunks(chunks);
+      setImportPdfTotalPages(totalPages);
+      setImportPdfSizeMb(mbStr);
+      setFeedback(
+        lang === 'ar'
+          ? chunks.length > 1
+            ? `تم تجهيز الملف (${mbStr} ميجا · ${totalPages} صفحة) وتقسيمه تلقائياً إلى ${chunks.length} أجزاء بدون أي تدخل منك!${skippedOversizedPages.length ? ` (تم تخطي ${skippedOversizedPages.length} صفحة ضخمة جداً)` : ''} اضغطي «استخراج الأسئلة الآن».`
+            : `تم إرفاق الملف بنجاح (${file.name} · ${mbStr} ميجا · ${totalPages} صفحة). اضغطي «استخراج الأسئلة الآن».`
+          : chunks.length > 1
+          ? `Prepared ${file.name} (${mbStr} MB, ${totalPages} pages) and auto-split into ${chunks.length} parts. Click Extract now.`
+          : `PDF attached (${file.name}, ${mbStr} MB, ${totalPages} pages).`
+      );
+    } catch {
+      setFeedback(
+        lang === 'ar'
+          ? 'تعذر قراءة هذا الـ PDF (قد يكون محمياً بكلمة سر). يمكنك نسخ الأسئلة ولصقها في الخانة النصية بالأسفل.'
+          : 'Could not read PDF (it may be password-protected). Paste question text below.'
+      );
+    } finally {
+      setImportPreparing(false);
+    }
+  };
+
+  const handleInstantLocalImport = () => {
+    if (!importRawText.trim()) {
+      setFeedback(
+        lang === 'ar'
+          ? 'الصقي نص الأسئلة أولاً في المربع للاستيراد المباشر.'
+          : 'Paste question text first to import locally.'
+      );
+      return;
+    }
+    const parsed = parseStructuredMcqsLocally(importRawText, qbUnitLabel.trim() || 'General');
+    if (parsed.length === 0) {
+      setFeedback(
+        lang === 'ar'
+          ? 'لم يطابق النص الصيغة المرقمة (مثال: 1. السؤال ثم a) b) c) d)). استخدمي زر الذكاء الاصطناعي لاستخلاص أي صيغة.'
+          : 'No numbered A/B/C/D pattern detected. Use AI extraction for unstructured text.'
+      );
+      return;
+    }
+    setExtractedPreview((prev) => [...prev, ...parsed]);
+    setFeedback(
+      lang === 'ar'
+        ? `تم استخراج ${parsed.length} سؤال فوراً بدون AI! راجعيها بالأسفل ثم اضغطي حفظ في البنك.`
+        : `Parsed ${parsed.length} questions instantly without AI!`
+    );
+  };
+
+  const callExtractEndpointWithRetry = async (payload: Record<string, unknown>) => {
+    let lastErr = 'Extraction failed';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+      }
       const resp = await fetch('/api/ai/extract-questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(importPdfBase64 ? { pdfBase64: importPdfBase64, mimeType: 'application/pdf' } : {}),
-          ...(importRawText.trim() ? { rawText: importRawText.trim() } : {}),
-          gradeLabel: gradeMeta ? gradeMeta.nameEn : qbGradeId,
-          defaultUnit: qbUnitLabel.trim() || 'General',
-          maxQuestions: 30,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = (await resp.json().catch(() => ({}))) as {
         questions?: Array<{
@@ -877,28 +1029,140 @@ export function AdminDashboardModal({
         }>;
         error?: string;
       };
-      if (!resp.ok) {
-        throw new Error(data.error || 'Extraction failed');
+      if (resp.ok) {
+        return Array.isArray(data.questions) ? data.questions : [];
       }
-      const list = Array.isArray(data.questions) ? data.questions : [];
-      if (list.length === 0) {
+      lastErr = data.error || `Error (${resp.status})`;
+      // Don't retry client/key errors
+      if (resp.status === 400 || resp.status === 403 || lastErr.includes('GEMINI_API_KEY')) {
+        throw new Error(lastErr);
+      }
+    }
+    throw new Error(lastErr);
+  };
+
+  const handleExtractQuestionsFromPdf = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (importPdfChunks.length === 0 && !importRawText.trim()) {
+      setFeedback(
+        lang === 'ar'
+          ? 'ارفعي ملف PDF أولاً أو الصقي نص الأسئلة للاستخراج.'
+          : 'Attach a PDF file or paste question text first.'
+      );
+      return;
+    }
+    setExtractingBank(true);
+    setExtractProgress('');
+    setFeedback('');
+
+    const gradeMeta = GRADES.find((g) => g.id === qbGradeId);
+    const gradeLabel = gradeMeta ? gradeMeta.nameEn : qbGradeId;
+    const defaultUnit = qbUnitLabel.trim() || 'General';
+
+    const collected: Array<{
+      unitLabel: string;
+      prompt: string;
+      options: string[];
+      correctIndex: number;
+      explanation?: string;
+    }> = [];
+    const seenPrompts = new Set(extractedPreview.map((q) => q.prompt.trim().toLowerCase()));
+
+    const pushUnique = (
+      items: Array<{
+        unitLabel: string;
+        prompt: string;
+        options: string[];
+        correctIndex: number;
+        explanation?: string;
+      }>
+    ) => {
+      items.forEach((item) => {
+        const key = item.prompt.trim().toLowerCase();
+        if (!seenPrompts.has(key)) {
+          seenPrompts.add(key);
+          collected.push(item);
+        }
+      });
+    };
+
+    try {
+      if (importPdfChunks.length > 0) {
+        for (let i = 0; i < importPdfChunks.length; i += 1) {
+          const chunk = importPdfChunks[i];
+          setExtractProgress(
+            lang === 'ar'
+              ? `جاري استخراج الجزء ${i + 1} من ${importPdfChunks.length} (صفحات ${chunk.label})... تم استخراج ${collected.length} سؤال`
+              : `Extracting part ${i + 1}/${importPdfChunks.length} (pages ${chunk.label})... ${collected.length} found`
+          );
+          const partQuestions = await callExtractEndpointWithRetry({
+            pdfBase64: chunk.base64,
+            mimeType: 'application/pdf',
+            ...(i === 0 && importRawText.trim() ? { rawText: importRawText.trim() } : {}),
+            gradeLabel,
+            defaultUnit,
+            maxQuestions: 25,
+          });
+          pushUnique(partQuestions);
+        }
+      } else {
+        const textChunks = chunkRawText(importRawText, 10000);
+        for (let i = 0; i < textChunks.length; i += 1) {
+          setExtractProgress(
+            lang === 'ar'
+              ? `جاري استخراج الدفعة ${i + 1} من ${textChunks.length}... تم استخراج ${collected.length} سؤال`
+              : `Extracting batch ${i + 1}/${textChunks.length}... ${collected.length} found`
+          );
+          const partQuestions = await callExtractEndpointWithRetry({
+            rawText: textChunks[i],
+            gradeLabel,
+            defaultUnit,
+            maxQuestions: 30,
+          });
+          pushUnique(partQuestions);
+        }
+      }
+
+      if (collected.length === 0) {
         setFeedback(
           lang === 'ar'
-            ? 'لم يتم العثور على أسئلة واضحة في الملف. جرّبي لصق النص مباشرة أو التأكد أن الملف نصي وليس صوراً غير واضحة.'
-            : 'No readable questions were detected. Try pasting the text directly.'
+            ? 'لم يتم العثور على أسئلة واضحة في الملف. جرّبي لصق النص مباشرة أو التأكد أن الملف واضح.'
+            : 'No readable questions were detected. Try pasting text directly.'
         );
       } else {
-        setExtractedPreview(list);
+        setExtractedPreview((prev) => [...prev, ...collected]);
         setFeedback(
           lang === 'ar'
-            ? `تم استخراج ${list.length} سؤال بنجاح! راجعيها بالأسفل ثم اضغطي حفظ في البنك.`
-            : `Extracted ${list.length} questions! Review below and save to bank.`
+            ? `تم استخراج ${collected.length} سؤال بنجاح! راجعيها بالأسفل ثم اضغطي حفظ في البنك.`
+            : `Extracted ${collected.length} questions! Review below and save to bank.`
         );
       }
     } catch (err) {
-      setFeedback(err instanceof Error ? err.message : 'PDF extraction failed');
+      // Save any partial progress already extracted before the error
+      if (collected.length > 0) {
+        setExtractedPreview((prev) => [...prev, ...collected]);
+      } else if (importRawText.trim()) {
+        // Automatic offline parser fallback if AI was busy on pasted text
+        const localFallback = parseStructuredMcqsLocally(importRawText, defaultUnit);
+        if (localFallback.length > 0) {
+          setExtractedPreview((prev) => [...prev, ...localFallback]);
+          setFeedback(
+            lang === 'ar'
+              ? `الذكاء الاصطناعي مشغول حالياً، لكن تم استخراج ${localFallback.length} سؤال تلقائياً من النص المنسق! راجعيها ثم اضغطي حفظ.`
+              : `AI is busy right now, so ${localFallback.length} questions were extracted directly from your formatted text!`
+          );
+          return;
+        }
+      }
+      const errMsg = err instanceof Error ? err.message : 'PDF extraction failed';
+      setFeedback(
+        collected.length > 0
+          ? `${lang === 'ar' ? `تم استخراج ${collected.length} سؤال قبل التوقف المؤقت:` : `Extracted ${collected.length} questions before pause:`} ${errMsg}`
+          : errMsg
+      );
     } finally {
       setExtractingBank(false);
+      setExtractProgress('');
     }
   };
 
@@ -907,25 +1171,31 @@ export function AdminDashboardModal({
     setBusy(true);
     setFeedback('');
     try {
-      const batch = writeBatch(db);
-      extractedPreview.forEach((item) => {
-        const ref = doc(collection(db, 'question_bank'));
-        batch.set(ref, {
-          gradeId: qbGradeId,
-          unitLabel: (item.unitLabel || qbUnitLabel || 'General').slice(0, 100),
-          prompt: item.prompt.slice(0, 600),
-          options: item.options.slice(0, 4).map((o) => o.slice(0, 200)),
-          correctIndex: Math.max(0, Math.min(item.options.length - 1, item.correctIndex)),
-          ...(item.explanation ? { explanation: item.explanation.slice(0, 500) } : {}),
-          authorUid: user.uid,
-          createdAt: serverTimestamp(),
+      const BATCH_LIMIT = 400;
+      for (let start = 0; start < extractedPreview.length; start += BATCH_LIMIT) {
+        const slice = extractedPreview.slice(start, start + BATCH_LIMIT);
+        const batch = writeBatch(db);
+        slice.forEach((item) => {
+          const ref = doc(collection(db, 'question_bank'));
+          batch.set(ref, {
+            gradeId: qbGradeId,
+            unitLabel: (item.unitLabel || qbUnitLabel || 'General').slice(0, 100),
+            prompt: item.prompt.slice(0, 600),
+            options: item.options.slice(0, 4).map((o) => o.slice(0, 200)),
+            correctIndex: Math.max(0, Math.min(item.options.length - 1, item.correctIndex)),
+            ...(item.explanation ? { explanation: item.explanation.slice(0, 500) } : {}),
+            authorUid: user.uid,
+            createdAt: serverTimestamp(),
+          });
         });
-      });
-      await batch.commit();
+        await batch.commit();
+      }
       const count = extractedPreview.length;
       setExtractedPreview([]);
       setImportPdfName('');
-      setImportPdfBase64('');
+      setImportPdfChunks([]);
+      setImportPdfTotalPages(0);
+      setImportPdfSizeMb('');
       setImportRawText('');
       setFeedback(
         lang === 'ar'
@@ -977,6 +1247,101 @@ export function AdminDashboardModal({
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `teacher_subscriptions/${sub.id}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGenerateActivationCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setBusy(true);
+    setFeedback('');
+    try {
+      const [rawType, ...rest] = codeTargetSelection.split(':');
+      const targetId = rest.join(':') || 'all';
+      const targetType = (rawType as ActivationCode['targetType']) || 'all_paid';
+
+      let targetTitle =
+        lang === 'ar' ? 'فتح كل الملفات والقصص المدفوعة (VIP)' : 'Full Paid Library Access (VIP)';
+      if (targetType === 'resource') {
+        const res = resources.find((r) => r.id === targetId);
+        if (res) targetTitle = lang === 'ar' ? res.titleAr : res.titleEn;
+      } else if (targetType === 'pack') {
+        const p = packs.find((pk) => pk.id === targetId);
+        if (p) targetTitle = `#${p.packNumber} ${lang === 'ar' ? p.titleAr : p.titleEn}`;
+      } else if (targetType === 'story') {
+        const st = stories.find((s) => s.id === targetId);
+        if (st) targetTitle = lang === 'ar' ? st.titleAr : st.titleEn;
+      }
+
+      const newCode = generateRandomActivationCode('LC');
+      const safeUses = Math.max(1, Math.min(500, Number(codeMaxUses) || 1));
+      await setDoc(doc(db, 'activation_codes', newCode), {
+        code: newCode,
+        targetType,
+        targetId,
+        targetTitle: targetTitle.slice(0, 180),
+        ...(codeNote.trim() ? { note: codeNote.trim().slice(0, 160) } : {}),
+        maxUses: safeUses,
+        usedCount: 0,
+        active: true,
+        createdByUid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      setLastCreatedCode(newCode);
+      setCodeNote('');
+      setFeedback(
+        lang === 'ar'
+          ? `تم توليد الكود (${newCode}) بنجاح! انسخيه وأرسليه للعميل على واتساب.`
+          : `Activation code ${newCode} generated!`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'activation_codes');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleToggleCodeActive = async (item: ActivationCode) => {
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, 'activation_codes', item.id), { active: !item.active });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `activation_codes/${item.id}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteActivationCode = async (item: ActivationCode) => {
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, 'activation_codes', item.id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `activation_codes/${item.id}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleClearOldAnalytics = async () => {
+    if (analyticsEvents.length === 0) return;
+    setBusy(true);
+    setFeedback('');
+    try {
+      const slice = analyticsEvents.slice(0, 400);
+      const batch = writeBatch(db);
+      slice.forEach((ev) => batch.delete(doc(db, 'analytics_events', ev.id)));
+      await batch.commit();
+      setFeedback(
+        lang === 'ar'
+          ? `تم مسح ${slice.length} سجل إحصائي بنجاح.`
+          : `Cleared ${slice.length} analytics events.`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'analytics_events');
     } finally {
       setBusy(false);
     }
@@ -1113,6 +1478,8 @@ export function AdminDashboardModal({
               <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 rounded-xl">
                 {(
                   [
+                    ['analytics', lang === 'ar' ? 'الزيارات والتحميلات' : 'Analytics'],
+                    ['codes', lang === 'ar' ? 'أكواد التفعيل' : 'Activation Codes'],
                     ['resources', lang === 'ar' ? 'الصفوف والتحضير' : 'Grades & Preps'],
                     ['packs', lang === 'ar' ? 'مجموعات أوراق العمل' : 'Worksheet Packs'],
                     ['quizbank', lang === 'ar' ? 'بنك الأسئلة والاشتراكات' : 'Question Bank & Subs'],
@@ -1306,8 +1673,8 @@ export function AdminDashboardModal({
                       className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                     />
                   )}
-                  <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer">
-                    <Upload className="w-3.5 h-3.5 text-slate-500" />
+                  <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50">
+                    <Upload className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     <span className="truncate">
                       {resFileName || (lang === 'ar' ? 'إرفاق ملف مباشر (حتى 650 كيلوبايت)' : 'Attach direct file (up to 650KB)')}
                     </span>
@@ -1322,6 +1689,40 @@ export function AdminDashboardModal({
                       }
                     />
                   </label>
+                  {resFileDataUrl && (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                      <span className="text-emerald-900 font-medium truncate">
+                        ✓ {resFileName} ({formatDataUrlKb(resFileDataUrl)})
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewFile({
+                              title: resTitleAr || resTitleEn || resFileName,
+                              fileName: resFileName,
+                              fileDataUrl: resFileDataUrl,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white border border-emerald-300 text-emerald-900 rounded hover:bg-emerald-100"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>{lang === 'ar' ? 'معاينة' : 'Preview'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResFileName('');
+                            setResFileDataUrl('');
+                          }}
+                          className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                          title={lang === 'ar' ? 'إزالة الملف' : 'Remove file'}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <input
                       type="url"
@@ -1351,10 +1752,10 @@ export function AdminDashboardModal({
                   </button>
                 </form>
 
-                <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
+                <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden max-h-[560px] overflow-y-auto">
                   {resources.map((item) => (
                     <div key={item.id} className="p-3.5 flex items-center justify-between gap-3 bg-white">
-                      <div className="min-w-0">
+                      <div className="min-w-0 space-y-1">
                         <p className="text-sm font-semibold text-slate-900 truncate">
                           {lang === 'ar' ? item.titleAr : item.titleEn}
                         </p>
@@ -1370,15 +1771,53 @@ export function AdminDashboardModal({
                           · {item.isInteractive ? labels.interactiveLabel : labels.nonInteractiveLabel} ·{' '}
                           {item.isPaid ? `${item.priceEgp} ${labels.egp}` : labels.freeLabel}
                         </p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {item.fileDataUrl ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                              <FileText className="w-3 h-3" />
+                              <span className="truncate max-w-[200px]">
+                                {lang === 'ar' ? 'مرفق:' : 'File:'} {item.fileName || 'uploaded'}
+                              </span>
+                            </span>
+                          ) : item.externalUrl ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded">
+                              <ExternalLink className="w-3 h-3" />
+                              <span>{lang === 'ar' ? 'مرفق رابط Google Drive' : 'External link'}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                              <span>{lang === 'ar' ? 'محتوى نصي (بدون ملف مرفق)' : 'Text content only'}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDoc('grades_resources', item.id)}
-                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg shrink-0"
-                        title={lang === 'ar' ? 'حذف' : 'Delete'}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewFile({
+                              title: lang === 'ar' ? item.titleAr : item.titleEn,
+                              fileName: item.fileName,
+                              fileDataUrl: item.fileDataUrl,
+                              externalUrl: item.externalUrl,
+                              contentText: item.contentText,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-sky-900 bg-sky-50 hover:bg-sky-100 rounded-lg"
+                          title={lang === 'ar' ? 'معاينة الملف' : 'Preview file'}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'عرض' : 'View'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDoc('grades_resources', item.id)}
+                          className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"
+                          title={lang === 'ar' ? 'حذف' : 'Delete'}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1598,6 +2037,39 @@ export function AdminDashboardModal({
                           onChange={(e) => handleBulkFilesRead(e.target.files)}
                         />
                       </label>
+                      {bulkFiles.length > 0 && (
+                        <div className="space-y-1.5 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                          {bulkFiles.map((bf, bIdx) => (
+                            <div key={`${bf.name}-${bIdx}`} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-emerald-900 font-medium truncate">
+                                ✓ {bf.name} ({formatDataUrlKb(bf.dataUrl)})
+                              </span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPreviewFile({
+                                      title: bf.name,
+                                      fileName: bf.name,
+                                      fileDataUrl: bf.dataUrl,
+                                    })
+                                  }
+                                  className="px-2 py-0.5 text-[11px] font-semibold bg-white border border-emerald-300 text-emerald-900 rounded hover:bg-emerald-100"
+                                >
+                                  {lang === 'ar' ? 'معاينة' : 'Preview'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBulkFiles((prev) => prev.filter((_, idx) => idx !== bIdx))}
+                                  className="p-0.5 text-rose-600 hover:bg-rose-50 rounded"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {bulkFiles.length === 0 && (
                         <input
                           type="url"
@@ -1671,19 +2143,46 @@ export function AdminDashboardModal({
                               <div className="divide-y divide-slate-100">
                                 {sheets.map((sheet) => (
                                   <div key={sheet.id} className="px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs">
-                                    <span className="text-slate-700 truncate">
-                                      <span className="font-mono-num text-slate-400 me-1.5">#{sheet.itemOrder}</span>
-                                      {lang === 'ar' ? sheet.titleAr : sheet.titleEn}
-                                    </span>
-                                    {hasCloudPacks && (
+                                    <div className="min-w-0 space-y-0.5">
+                                      <p className="text-slate-800 font-medium truncate">
+                                        <span className="font-mono-num text-slate-400 me-1.5">#{sheet.itemOrder}</span>
+                                        {lang === 'ar' ? sheet.titleAr : sheet.titleEn}
+                                      </p>
+                                      <p className="text-[11px] text-slate-500 truncate">
+                                        {sheet.fileDataUrl
+                                          ? `📎 ${sheet.fileName || (lang === 'ar' ? 'ملف مرفق' : 'File attached')}`
+                                          : sheet.externalUrl
+                                          ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
+                                          : `📝 ${lang === 'ar' ? 'نص بدون مرفق' : 'Text only'}`}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0">
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteDoc('worksheet_items', sheet.id)}
-                                        className="text-rose-600 hover:text-rose-800 shrink-0"
+                                        onClick={() =>
+                                          setPreviewFile({
+                                            title: lang === 'ar' ? sheet.titleAr : sheet.titleEn,
+                                            fileName: sheet.fileName,
+                                            fileDataUrl: sheet.fileDataUrl,
+                                            externalUrl: sheet.externalUrl,
+                                            contentText: sheet.contentText,
+                                          })
+                                        }
+                                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-sky-900 bg-sky-50 hover:bg-sky-100 rounded"
                                       >
-                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <Eye className="w-3 h-3" />
+                                        <span>{lang === 'ar' ? 'عرض' : 'View'}</span>
                                       </button>
-                                    )}
+                                      {hasCloudPacks && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteDoc('worksheet_items', sheet.id)}
+                                          className="text-rose-600 hover:text-rose-800 p-1"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
@@ -1759,8 +2258,8 @@ export function AdminDashboardModal({
                     onChange={(e) => setStPreview(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                   />
-                  <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer">
-                    <Upload className="w-3.5 h-3.5 text-slate-500" />
+                  <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50">
+                    <Upload className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     <span className="truncate">{stFileName || (lang === 'ar' ? 'رفع ملف القصة (حتى 650 كيلوبايت)' : 'Attach story file (up to 650KB)')}</span>
                     <input
                       type="file"
@@ -1773,6 +2272,39 @@ export function AdminDashboardModal({
                       }
                     />
                   </label>
+                  {stFileDataUrl && (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                      <span className="text-emerald-900 font-medium truncate">
+                        ✓ {stFileName} ({formatDataUrlKb(stFileDataUrl)})
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewFile({
+                              title: stTitleAr || stTitleEn || stFileName,
+                              fileName: stFileName,
+                              fileDataUrl: stFileDataUrl,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white border border-emerald-300 text-emerald-900 rounded hover:bg-emerald-100"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>{lang === 'ar' ? 'معاينة' : 'Preview'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStFileName('');
+                            setStFileDataUrl('');
+                          }}
+                          className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <input
                     type="url"
                     dir="ltr"
@@ -1797,21 +2329,46 @@ export function AdminDashboardModal({
                 <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
                   {stories.map((story) => (
                     <div key={story.id} className="p-3.5 flex items-center justify-between gap-3 bg-white">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-semibold text-slate-900 truncate">
                           {lang === 'ar' ? story.titleAr : story.titleEn}
                         </p>
                         <p className="text-xs text-slate-500">
                           {story.levelLabel} · {story.priceEgp} EGP
                         </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {story.fileDataUrl
+                            ? `📎 ${story.fileName || (lang === 'ar' ? 'ملف القصة مرفق' : 'Story file attached')}`
+                            : story.externalUrl
+                            ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
+                            : `📝 ${lang === 'ar' ? 'مقتطف نصي فقط' : 'Excerpt only'}`}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDoc('stories', story.id)}
-                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewFile({
+                              title: lang === 'ar' ? story.titleAr : story.titleEn,
+                              fileName: story.fileName,
+                              fileDataUrl: story.fileDataUrl,
+                              externalUrl: story.externalUrl,
+                              contentText: story.previewExcerpt,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-sky-900 bg-sky-50 hover:bg-sky-100 rounded-lg"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'عرض' : 'View'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDoc('stories', story.id)}
+                          className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1867,8 +2424,8 @@ export function AdminDashboardModal({
                     }}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                   />
-                  <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer">
-                    <Upload className="w-3.5 h-3.5 text-slate-500" />
+                  <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50">
+                    <Upload className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     <span className="truncate">{opFileName || (lang === 'ar' ? 'رفع ملف (حتى 650 كيلوبايت)' : 'Attach file (up to 650KB)')}</span>
                     <input
                       type="file"
@@ -1881,6 +2438,39 @@ export function AdminDashboardModal({
                       }
                     />
                   </label>
+                  {opFileDataUrl && (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                      <span className="text-emerald-900 font-medium truncate">
+                        ✓ {opFileName} ({formatDataUrlKb(opFileDataUrl)})
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewFile({
+                              title: opTitleAr || opTitleEn || opFileName,
+                              fileName: opFileName,
+                              fileDataUrl: opFileDataUrl,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white border border-emerald-300 text-emerald-900 rounded hover:bg-emerald-100"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>{lang === 'ar' ? 'معاينة' : 'Preview'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpFileName('');
+                            setOpFileDataUrl('');
+                          }}
+                          className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <input
                     type="url"
                     dir="ltr"
@@ -1905,21 +2495,46 @@ export function AdminDashboardModal({
                 <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
                   {papers.map((paper) => (
                     <div key={paper.id} className="p-3.5 flex items-center justify-between gap-3 bg-white">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-semibold text-slate-900 truncate">
                           {lang === 'ar' ? paper.titleAr : paper.titleEn}
                         </p>
                         <p className="text-xs text-slate-500">
                           {lang === 'ar' ? paper.categoryAr : paper.categoryEn}
                         </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {paper.fileDataUrl
+                            ? `📎 ${paper.fileName || (lang === 'ar' ? 'ملف مرفق' : 'File attached')}`
+                            : paper.externalUrl
+                            ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
+                            : `📝 ${lang === 'ar' ? 'نص فقط' : 'Text only'}`}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDoc('official_papers', paper.id)}
-                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewFile({
+                              title: lang === 'ar' ? paper.titleAr : paper.titleEn,
+                              fileName: paper.fileName,
+                              fileDataUrl: paper.fileDataUrl,
+                              externalUrl: paper.externalUrl,
+                              contentText: paper.contentText,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-sky-900 bg-sky-50 hover:bg-sky-100 rounded-lg"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'عرض' : 'View'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDoc('official_papers', paper.id)}
+                          className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2307,7 +2922,7 @@ export function AdminDashboardModal({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="space-y-1">
                       <h3 className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-sky-900" />
+                        <Wand2 className="w-4 h-4 text-sky-900" />
                         <span>
                           {lang === 'ar'
                             ? 'استيراد أسئلة من ملف PDF دفعة واحدة بالذكاء الاصطناعي'
@@ -2316,8 +2931,8 @@ export function AdminDashboardModal({
                       </h3>
                       <p className="text-xs text-slate-600">
                         {lang === 'ar'
-                          ? 'ارفعي ملف الـ PDF (حتى 3 ميجا) أو الصقي نص الأسئلة، وسيستخرجها الذكاء الاصطناعي كاختيار من متعدد ويحفظها في البنك بضغطة واحدة. كل سؤال يضاف لأي صف يتحول تلقائياً لأسئلة تفاعلية للطلاب داخل قسم الصفوف والورق وداخل منصة الكويزات للمعلمين.'
-                          : 'Upload a PDF (up to 3MB) or paste text to extract up to 30 MCQs straight into your Question Bank. Every saved question automatically powers interactive student practice in the Grades Library and the Teacher Quiz Builder.'}
+                          ? 'ارفعي أي ملف PDF (بأي حجم حتى 25 ميجا — يتم تقسيمه تلقائياً!) أو ملف نصي/JSON أو الصقي الأسئلة بالأسفل، وسيستخرجها النظام ويحفظها في البنك لتعمل فوراً في قسم الصفوف ومنصة الكويزات.'
+                          : 'Upload any PDF (even large files — auto-split into safe parts!) or TXT/JSON, or paste questions below to import straight into your Question Bank.'}
                       </p>
                     </div>
                   </div>
@@ -2344,61 +2959,102 @@ export function AdminDashboardModal({
                     <label className="md:col-span-6 flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-sky-400 rounded-lg cursor-pointer hover:bg-sky-50">
                       <Upload className="w-4 h-4 text-sky-900 shrink-0" />
                       <span className="truncate font-medium text-sky-950">
-                        {importPdfName
-                          ? importPdfName
+                        {importPreparing
+                          ? lang === 'ar'
+                            ? 'جاري فحص وتقسيم الملف تلقائياً...'
+                            : 'Preparing & splitting PDF...'
+                          : importPdfName
+                          ? `${importPdfName} (${importPdfSizeMb} MB · ${importPdfTotalPages}p)`
                           : lang === 'ar'
-                          ? 'اضغطي لاختيار ملف الـ PDF من جهازك'
-                          : 'Choose PDF file from device'}
+                          ? 'اضغطي لاختيار ملف PDF (بأي حجم) أو TXT/JSON'
+                          : 'Choose PDF (any size) or TXT/JSON'}
                       </span>
                       <input
                         type="file"
-                        accept="application/pdf,.pdf"
+                        accept="application/pdf,.pdf,.txt,.json,.csv"
                         className="hidden"
-                        onChange={(e) => handlePdfBankFileChange(e.target.files?.[0])}
+                        onChange={(e) => void handlePdfBankFileChange(e.target.files?.[0])}
                       />
                     </label>
                   </div>
 
+                  {importPdfName && importPdfChunks.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                      <span className="text-emerald-950 font-medium">
+                        ✓ {importPdfName} — {importPdfSizeMb} MB · {importPdfTotalPages}{' '}
+                        {lang === 'ar' ? 'صفحة' : 'pages'} ·{' '}
+                        {importPdfChunks.length > 1
+                          ? lang === 'ar'
+                            ? `مقسم تلقائياً إلى ${importPdfChunks.length} أجزاء جاهزة`
+                            : `Auto-split into ${importPdfChunks.length} ready parts`
+                          : lang === 'ar'
+                          ? 'جاهز للاستخراج'
+                          : 'Ready to extract'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportPdfName('');
+                          setImportPdfChunks([]);
+                          setImportPdfTotalPages(0);
+                          setImportPdfSizeMb('');
+                        }}
+                        className="text-xs font-semibold text-rose-700 hover:underline"
+                      >
+                        {lang === 'ar' ? 'إزالة الملف' : 'Clear PDF'}
+                      </button>
+                    </div>
+                  )}
+
                   <textarea
-                    rows={2}
+                    rows={3}
                     dir="auto"
                     placeholder={
                       lang === 'ar'
-                        ? 'اختياري: لو الـ PDF حجمه أكبر من 3 ميجا، انسخي منه الأسئلة والصقيها هنا...'
-                        : 'Optional: paste copied question text here if PDF exceeds 3MB...'
+                        ? 'أو الصقي نص الأسئلة هنا (مثال: 1. She ___ to school.  a) go  b) goes  c) going  d) went   Answer: b) للاستخراج بالذكاء أو للاستيراد السريع الفوري بدون AI...'
+                        : 'Or paste questions text here (e.g., 1. She ___ to school. a) go b) goes ... Answer: b) for AI or instant offline import...'
                     }
                     value={importRawText}
                     onChange={(e) => setImportRawText(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                   />
 
+                  {extractProgress && (
+                    <p className="text-xs font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-3.5 py-2">
+                      {extractProgress}
+                    </p>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="submit"
-                      disabled={extractingBank || busy}
+                      disabled={extractingBank || importPreparing || busy}
                       className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800 disabled:opacity-60"
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Wand2 className="w-3.5 h-3.5" />
                       <span>
                         {extractingBank
                           ? lang === 'ar'
-                            ? 'جاري قراءة الـ PDF واستخراج الأسئلة...'
-                            : 'Extracting questions...'
+                            ? 'جاري استخراج الأسئلة بالذكاء الاصطناعي...'
+                            : 'Extracting questions with AI...'
                           : lang === 'ar'
-                          ? 'استخراج الأسئلة من الـ PDF الآن'
-                          : 'Extract Questions from PDF'}
+                          ? 'استخراج بالذكاء الاصطناعي الآن'
+                          : 'Extract with AI Now'}
                       </span>
                     </button>
-                    {importPdfName && (
+                    {importRawText.trim().length > 0 && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setImportPdfName('');
-                          setImportPdfBase64('');
-                        }}
-                        className="text-xs text-slate-600 hover:text-rose-700"
+                        disabled={extractingBank || busy}
+                        onClick={handleInstantLocalImport}
+                        className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-emerald-700 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-60"
                       >
-                        {lang === 'ar' ? 'إزالة الملف' : 'Clear PDF'}
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>
+                          {lang === 'ar'
+                            ? 'استيراد سريع للنص المنسق (بدون AI)'
+                            : 'Instant Formatted Text Import (No AI)'}
+                        </span>
                       </button>
                     )}
                   </div>
@@ -2895,9 +3551,487 @@ export function AdminDashboardModal({
                 </div>
               </div>
             )}
+            {tab === 'analytics' && (() => {
+              const today = new Date();
+              const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
+                2,
+                '0'
+              )}-${String(today.getDate()).padStart(2, '0')}`;
+              const totalVisits = analyticsEvents.filter((e) => e.eventType === 'page_visit').length;
+              const todayVisits = analyticsEvents.filter(
+                (e) => e.eventType === 'page_visit' && e.dayKey === todayKey
+              ).length;
+              const downloadEvents = analyticsEvents.filter((e) => e.eventType === 'file_download');
+              const interactiveEvents = analyticsEvents.filter(
+                (e) => e.eventType === 'interactive_start' || e.eventType === 'code_redeem'
+              );
+              const mobileCount = analyticsEvents.filter((e) => e.deviceType === 'mobile').length;
+              const mobilePct =
+                analyticsEvents.length > 0
+                  ? Math.round((mobileCount / analyticsEvents.length) * 100)
+                  : 0;
+
+              const downloadRanking = new Map<string, number>();
+              downloadEvents.forEach((ev) => {
+                downloadRanking.set(ev.itemTitle, (downloadRanking.get(ev.itemTitle) || 0) + 1);
+              });
+              const topDownloads = Array.from(downloadRanking.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8);
+
+              return (
+                <div className="space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-sky-50 border border-sky-200 rounded-xl p-4">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-sky-900" />
+                        <span>
+                          {lang === 'ar'
+                            ? 'سجل الزيارات والتحميلات الفعلي (مباشر)'
+                            : 'Live Visitor & Download Analytics'}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-600">
+                        {lang === 'ar'
+                          ? 'يُسجّل تلقائياً كل زيارة جديدة للموقع وكل تحميل ملف أو نشاط تفاعلي مع اسم الملف ونوع الجهاز.'
+                          : 'Automatically tracks unique session visits, file downloads, interactive quiz starts, and mobile/desktop usage.'}
+                      </p>
+                    </div>
+                    {analyticsEvents.length > 0 && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={handleClearOldAnalytics}
+                        className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-white border border-rose-200 rounded-lg hover:bg-rose-50"
+                      >
+                        {lang === 'ar' ? 'تصفير السجل' : 'Clear Logs'}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-slate-900 font-mono-num">{totalVisits}</p>
+                      <p className="text-xs text-slate-600 mt-1">
+                        {lang === 'ar' ? 'إجمالي الزيارات' : 'Total Visits'}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-emerald-700 font-mono-num">{todayVisits}</p>
+                      <p className="text-xs text-slate-600 mt-1">
+                        {lang === 'ar' ? 'زيارات اليوم' : "Today's Visits"}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-sky-900 font-mono-num">
+                        {downloadEvents.length}
+                      </p>
+                      <p className="text-xs text-slate-600 mt-1">
+                        {lang === 'ar' ? 'مرات تحميل الملفات' : 'File Downloads'}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-amber-700 font-mono-num">{mobilePct}%</p>
+                      <p className="text-xs text-slate-600 mt-1">
+                        {lang === 'ar'
+                          ? `موبايل (مقابل ${100 - mobilePct}% كمبيوتر)`
+                          : `Mobile (${interactiveEvents.length} actions)`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-900 border-b border-slate-100 pb-2">
+                        {lang === 'ar' ? 'أكثر الملفات تحميلاً' : 'Most Downloaded Files'}
+                      </h4>
+                      {topDownloads.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-4 text-center">
+                          {lang === 'ar'
+                            ? 'لم يتم تسجيل تحميلات بعد — سيظهر كل ملف يحمله الزوار هنا فوراً.'
+                            : 'No file downloads recorded yet.'}
+                        </p>
+                      ) : (
+                        <div className="divide-y divide-slate-100">
+                          {topDownloads.map(([title, count]) => (
+                            <div key={title} className="py-2 flex items-center justify-between gap-2 text-xs">
+                              <span className="font-medium text-slate-800 truncate">{title}</span>
+                              <span className="font-mono-num font-bold text-sky-900 shrink-0">
+                                {count}×
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-900 border-b border-slate-100 pb-2">
+                        {lang === 'ar'
+                          ? `آخر الأنشطة (${analyticsEvents.length})`
+                          : `Recent Activity (${analyticsEvents.length})`}
+                      </h4>
+                      <div className="max-h-[340px] overflow-y-auto divide-y divide-slate-100">
+                        {analyticsEvents.length === 0 ? (
+                          <p className="text-xs text-slate-500 py-4 text-center">
+                            {lang === 'ar' ? 'لا توجد أنشطة مسجلة حتى الآن.' : 'No recorded events yet.'}
+                          </p>
+                        ) : (
+                          analyticsEvents.slice(0, 60).map((ev) => (
+                            <div key={ev.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                              <div className="min-w-0 space-y-0.5">
+                                <p className="font-semibold text-slate-900 truncate">{ev.itemTitle}</p>
+                                <p className="text-[11px] text-slate-500">
+                                  {ev.eventType === 'file_download'
+                                    ? lang === 'ar'
+                                      ? '📥 تحميل ملف'
+                                      : '📥 Download'
+                                    : ev.eventType === 'code_redeem'
+                                    ? lang === 'ar'
+                                      ? '🔑 تفعيل كود'
+                                      : '🔑 Code Redeem'
+                                    : ev.eventType === 'interactive_start'
+                                    ? lang === 'ar'
+                                      ? '▶ نشاط تفاعلي'
+                                      : '▶ Interactive'
+                                    : lang === 'ar'
+                                    ? '👁 زيارة للموقع'
+                                    : '👁 Visit'}{' '}
+                                  · {ev.section} · {ev.deviceType === 'mobile' ? '📱' : '💻'}
+                                </p>
+                              </div>
+                              <span className="font-mono-num text-[11px] text-slate-400 shrink-0">
+                                {ev.dayKey}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {tab === 'codes' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <form
+                  onSubmit={handleGenerateActivationCode}
+                  className="lg:col-span-5 bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3.5"
+                >
+                  <h3 className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-emerald-700" />
+                    <span>
+                      {lang === 'ar'
+                        ? 'توليد كود تفعيل فوري للملفات المدفوعة'
+                        : 'Generate Instant Activation Code'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'بعد ما العميل يحوّل إنستاباي، ولّدي كوداً هنا وانسخيه في الواتساب — بمجرد ما يكتبه في الموقع يفتحله الملف فوراً.'
+                      : 'Generate a code for any paid item or full VIP access and send it to the customer on WhatsApp.'}
+                  </p>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {lang === 'ar' ? 'المحتوى المطلوب فتحه بالكود' : 'Target Item to Unlock'}
+                    </label>
+                    <select
+                      value={codeTargetSelection}
+                      onChange={(e) => setCodeTargetSelection(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    >
+                      <option value="all_paid:all">
+                        {lang === 'ar'
+                          ? '★ فتح كل الملفات والحزم والقصص المدفوعة (VIP)'
+                          : '★ Full Paid Library Access (VIP)'}
+                      </option>
+                      {resources
+                        .filter((r) => r.isPaid)
+                        .map((r) => (
+                          <option key={r.id} value={`resource:${r.id}`}>
+                            [{lang === 'ar' ? 'صف' : 'Grade'}] {lang === 'ar' ? r.titleAr : r.titleEn}
+                          </option>
+                        ))}
+                      {packs
+                        .filter((p) => p.isPaid)
+                        .map((p) => (
+                          <option key={p.id} value={`pack:${p.id}`}>
+                            [{lang === 'ar' ? 'حزمة' : 'Pack'} #{p.packNumber}]{' '}
+                            {lang === 'ar' ? p.titleAr : p.titleEn}
+                          </option>
+                        ))}
+                      {stories
+                        .filter((s) => s.isPaid)
+                        .map((s) => (
+                          <option key={s.id} value={`story:${s.id}`}>
+                            [{lang === 'ar' ? 'قصة' : 'Story'}] {lang === 'ar' ? s.titleAr : s.titleEn}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'أقصى عدد مرات استخدام' : 'Max Uses'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={codeMaxUses}
+                        onChange={(e) => setCodeMaxUses(Number(e.target.value) || 1)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'اسم العميل / ملاحظة' : 'Customer Note'}
+                      </label>
+                      <input
+                        type="text"
+                        value={codeNote}
+                        onChange={(e) => setCodeNote(e.target.value)}
+                        placeholder={lang === 'ar' ? 'أ. أحمد — إنستاباي' : 'Client name'}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="w-full py-2.5 text-xs font-semibold bg-emerald-700 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-60"
+                  >
+                    {lang === 'ar' ? 'توليد كود تفعيل جديد الآن' : 'Generate New Code'}
+                  </button>
+
+                  {lastCreatedCode && (
+                    <div className="bg-emerald-50 border border-emerald-300 rounded-lg p-3 space-y-2">
+                      <p className="text-xs font-bold text-emerald-950">
+                        {lang === 'ar' ? 'جاهز للإرسال على الواتساب:' : 'Ready to send:'}
+                      </p>
+                      <div className="flex items-center justify-between gap-2 bg-white border border-emerald-200 rounded px-3 py-2">
+                        <span dir="ltr" className="font-mono text-sm font-bold text-slate-900">
+                          {lastCreatedCode}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const msg =
+                              lang === 'ar'
+                                ? `تم تأكيد الدفع! كود التفعيل الخاص بك هو: ${lastCreatedCode}\nادخلي على الموقع واضغطي (تفعيل بكود) في الشريط العلوي لفتح الملف فوراً:\nhttps://tahdeery.vercel.app`
+                                : `Your activation code is: ${lastCreatedCode}\nOpen https://tahdeery.vercel.app and click "Redeem Code" to unlock immediately.`;
+                            void navigator.clipboard.writeText(msg);
+                            setCopiedKey(`code_${lastCreatedCode}`);
+                            setTimeout(() => setCopiedKey(''), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-emerald-700 text-white rounded hover:bg-emerald-600"
+                        >
+                          {copiedKey === `code_${lastCreatedCode}` ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {copiedKey === `code_${lastCreatedCode}`
+                              ? labels.copied
+                              : lang === 'ar'
+                              ? 'نسخ رسالة الواتساب'
+                              : 'Copy Message'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </form>
+
+                <div className="lg:col-span-7 space-y-2.5 max-h-[540px] overflow-y-auto">
+                  <p className="text-xs font-bold text-slate-700">
+                    {lang === 'ar'
+                      ? `الأكواد المُصدرة (${activationCodes.length})`
+                      : `Issued Codes (${activationCodes.length})`}
+                  </p>
+                  {activationCodes.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-6 text-center bg-slate-50 border border-slate-200 rounded-xl">
+                      {lang === 'ar'
+                        ? 'لم تولّدي أكواد تفعيل بعد.'
+                        : 'No activation codes generated yet.'}
+                    </p>
+                  ) : (
+                    activationCodes.map((c) => (
+                      <div
+                        key={c.id}
+                        className="p-3.5 bg-white border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span dir="ltr" className="font-mono text-sm font-bold text-sky-950">
+                              {c.code}
+                            </span>
+                            <span
+                              className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                                c.active && c.usedCount < c.maxUses
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {c.usedCount} / {c.maxUses}{' '}
+                              {lang === 'ar' ? 'استخدام' : 'uses'}
+                            </span>
+                          </div>
+                          <p className="text-xs font-medium text-slate-700 truncate">
+                            {c.targetTitle}
+                            {c.note ? ` · ${c.note}` : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(c.code);
+                              setCopiedKey(`row_${c.id}`);
+                              setTimeout(() => setCopiedKey(''), 1500);
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-semibold bg-sky-50 text-sky-900 border border-sky-200 rounded-lg hover:bg-sky-100"
+                          >
+                            {copiedKey === `row_${c.id}` ? labels.copied : lang === 'ar' ? 'نسخ' : 'Copy'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleToggleCodeActive(c)}
+                            className="px-2.5 py-1.5 text-xs font-semibold bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
+                          >
+                            {c.active
+                              ? lang === 'ar'
+                                ? 'إيقاف'
+                                : 'Pause'
+                              : lang === 'ar'
+                              ? 'تفعيل'
+                              : 'Enable'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleDeleteActivationCode(c)}
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
+
+      {previewFile && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl max-h-[88vh] flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-900 truncate">{previewFile.title}</h3>
+                {previewFile.fileName && (
+                  <p className="text-xs text-slate-500 truncate">
+                    {previewFile.fileName}
+                    {previewFile.fileDataUrl ? ` (${formatDataUrlKb(previewFile.fileDataUrl)})` : ''}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {previewFile.fileDataUrl && (
+                  <a
+                    href={previewFile.fileDataUrl}
+                    download={previewFile.fileName || 'file'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'تحميل' : 'Download'}</span>
+                  </a>
+                )}
+                {previewFile.externalUrl && (
+                  <a
+                    href={previewFile.externalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'فتح الرابط' : 'Open Link'}</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPreviewFile(null)}
+                  className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto min-h-[260px] bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-center">
+              {previewFile.fileDataUrl?.startsWith('data:image/') ? (
+                <img
+                  src={previewFile.fileDataUrl}
+                  alt={previewFile.title}
+                  className="max-h-[60vh] w-auto object-contain rounded"
+                />
+              ) : previewBlobUrl && previewFile.fileDataUrl?.includes('pdf') ? (
+                <iframe
+                  src={previewBlobUrl}
+                  title={previewFile.title}
+                  className="w-full h-[60vh] rounded border border-slate-200 bg-white"
+                />
+              ) : previewFile.fileDataUrl ? (
+                <div className="text-center space-y-3 p-6">
+                  <FileText className="w-10 h-10 text-sky-800 mx-auto" />
+                  <p className="text-sm font-semibold text-slate-900">
+                    {lang === 'ar' ? 'الملف مرفق وموجود بنجاح:' : 'File attached successfully:'}{' '}
+                    {previewFile.fileName}
+                  </p>
+                  <a
+                    href={previewFile.fileDataUrl}
+                    download={previewFile.fileName || 'file'}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>{lang === 'ar' ? 'تنزيل وفتح الملف على جهازك' : 'Download & Open File'}</span>
+                  </a>
+                </div>
+              ) : previewFile.externalUrl ? (
+                <div className="text-center space-y-3 p-6">
+                  <ExternalLink className="w-10 h-10 text-sky-800 mx-auto" />
+                  <p className="text-xs text-slate-600 font-mono break-all max-w-md">
+                    {previewFile.externalUrl}
+                  </p>
+                  <a
+                    href={previewFile.externalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>{lang === 'ar' ? 'فتح الملف في Google Drive' : 'Open in Google Drive'}</span>
+                  </a>
+                </div>
+              ) : (
+                <pre className="w-full h-full text-xs text-slate-800 whitespace-pre-wrap font-sans leading-relaxed p-2">
+                  {previewFile.contentText || (lang === 'ar' ? 'لا يوجد محتوى نصي.' : 'No text content.')}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

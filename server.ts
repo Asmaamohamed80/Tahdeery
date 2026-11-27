@@ -141,7 +141,9 @@ function isTransientAiOverloadError(error: unknown): boolean {
     msg.includes('UNAVAILABLE') ||
     msg.includes('high demand') ||
     msg.includes('RESOURCE_EXHAUSTED') ||
-    msg.includes('429')
+    msg.includes('429') ||
+    msg.includes('404') ||
+    msg.includes('NOT_FOUND')
   );
 }
 
@@ -155,8 +157,9 @@ async function generateWithRetryAndFallback(
 ) {
   const attempts: Array<{ model: string; delayMs: number; useLowThinking: boolean }> = [
     { model: 'gemini-4-hydrogen', delayMs: 0, useLowThinking: Boolean(params.preferFastThinking) },
-    { model: 'gemini-4-hydrogen', delayMs: 1200, useLowThinking: Boolean(params.preferFastThinking) },
-    { model: 'gemini-3.1-flash-lite', delayMs: 800, useLowThinking: false },
+    { model: 'gemini-3.1-flash-lite', delayMs: 600, useLowThinking: false },
+    { model: 'gemini-4-hydrogen', delayMs: 1400, useLowThinking: Boolean(params.preferFastThinking) },
+    { model: 'gemini-3.1-flash-lite', delayMs: 2000, useLowThinking: false },
   ];
 
   let lastError: unknown;

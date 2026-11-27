@@ -1,3 +1,6 @@
+import { trackAnalyticsEvent } from './analyticsAndUnlock';
+import type { Lang } from '../types';
+
 export function normalizeExternalDownloadUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   if (!trimmed.startsWith('https://')) return trimmed;
@@ -23,8 +26,31 @@ export function downloadTextOrHtmlFile(options: {
   externalUrl?: string;
   brandHeader?: string;
   logoDataUrl?: string;
+  analyticsSection?: string;
+  analyticsItemId?: string;
+  analyticsLang?: Lang;
 }) {
-  const { fileName, title, subtitle, bodyText, fileDataUrl, externalUrl, brandHeader, logoDataUrl } = options;
+  const {
+    fileName,
+    title,
+    subtitle,
+    bodyText,
+    fileDataUrl,
+    externalUrl,
+    brandHeader,
+    logoDataUrl,
+    analyticsSection = 'downloads',
+    analyticsItemId,
+    analyticsLang = 'ar',
+  } = options;
+
+  void trackAnalyticsEvent({
+    eventType: 'file_download',
+    section: analyticsSection,
+    itemTitle: title || fileName || 'Document',
+    itemId: analyticsItemId,
+    lang: analyticsLang,
+  });
 
   const triggerDownload = (href: string, name: string) => {
     const link = document.createElement('a');

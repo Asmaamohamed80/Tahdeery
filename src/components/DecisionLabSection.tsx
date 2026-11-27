@@ -10,7 +10,6 @@ import {
   Medal,
   RotateCcw,
   ShieldCheck,
-  Sparkles,
   X,
   XCircle,
 } from 'lucide-react';
@@ -456,7 +455,7 @@ export function DecisionLabSection({ lang, settings }: DecisionLabSectionProps) 
 
                   <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-xs font-semibold text-sky-900 flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                       <span>
                         {lang === 'ar' ? 'المهارة المكتسبة:' : 'Skill Unlocked:'}{' '}
                         <strong className="text-slate-900">

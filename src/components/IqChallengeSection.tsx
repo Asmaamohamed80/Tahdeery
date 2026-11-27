@@ -10,7 +10,6 @@ import {
   HeartHandshake,
   HelpCircle,
   RotateCcw,
-  Sparkles,
   Trophy,
   X,
   XCircle,
@@ -1177,7 +1176,7 @@ export function IqChallengeSection({ lang, settings }: IqChallengeSectionProps) 
                     onClick={() => resetTest()}
                     className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-slate-800 bg-slate-100 rounded-xl hover:bg-slate-200"
                   >
-                    <Sparkles className="w-4 h-4 text-amber-700" />
+                    <RotateCcw className="w-4 h-4 text-sky-900" />
                     <span>{lang === 'ar' ? 'إعادة الاختبار أو تجربة فئة أخرى' : 'Retake / Try Another Level'}</span>
                   </button>
                 </div>
@@ -1484,7 +1483,7 @@ export function IqChallengeSection({ lang, settings }: IqChallengeSectionProps) 
                   onClick={() => startMemoryRound(0)}
                   className="inline-flex items-center gap-2 px-7 py-3 text-sm font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 transition-colors"
                 >
-                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <Brain className="w-4 h-4 text-amber-300" />
                   <span>{lang === 'ar' ? 'ابدأ تحدي الذاكرة الآن' : 'Start Memory Challenge'}</span>
                 </button>
               </div>

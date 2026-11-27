@@ -415,6 +415,58 @@
         "activatedByUid",
         "activatedAt"
       ]
+    },
+    "ActivationCode": {
+      "title": "ActivationCode",
+      "description": "Single or multi-use redemption code created by admin to unlock paid resources, worksheet packs, or stories.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 4, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetType": { "type": "string", "enum": ["resource", "pack", "story", "all_paid"] },
+        "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "targetTitle": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "note": { "type": "string", "maxLength": 160 },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "code",
+        "targetType",
+        "targetId",
+        "targetTitle",
+        "maxUses",
+        "usedCount",
+        "active",
+        "createdByUid",
+        "createdAt"
+      ]
+    },
+    "AnalyticsEvent": {
+      "title": "AnalyticsEvent",
+      "description": "Anonymous privacy-friendly visit, download, and learning interaction telemetry visible only to admin.",
+      "type": "object",
+      "properties": {
+        "eventType": { "type": "string", "enum": ["page_visit", "file_download", "interactive_start", "code_redeem"] },
+        "section": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "itemTitle": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "itemId": { "type": "string", "maxLength": 128 },
+        "deviceType": { "type": "string", "enum": ["mobile", "desktop"] },
+        "lang": { "type": "string", "enum": ["ar", "en"] },
+        "dayKey": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "eventType",
+        "section",
+        "itemTitle",
+        "deviceType",
+        "lang",
+        "dayKey",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -473,6 +525,14 @@
     "/orders/{orderId}": {
       "schema": { "$ref": "#/entities/OrderRecord" },
       "description": "InstaPay/WhatsApp order records."
+    },
+    "/activation_codes/{codeId}": {
+      "schema": { "$ref": "#/entities/ActivationCode" },
+      "description": "Admin-issued redemption codes for unlocking paid resources."
+    },
+    "/analytics_events/{eventId}": {
+      "schema": { "$ref": "#/entities/AnalyticsEvent" },
+      "description": "Anonymous site visit and file download telemetry readable only by admin."
     },
     "/admins/{uid}": {
       "schema": { "$ref": "#/entities/AdminMember" },

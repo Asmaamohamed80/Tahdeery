@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Download, Share2, Sparkles } from 'lucide-react';
+import { Check, Copy, Download, Share2, Wand2 } from 'lucide-react';
 import {
   addDoc,
   collection,
@@ -208,7 +208,7 @@ ${homework}`;
             onClick={handleAiDraft}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 transition-colors whitespace-nowrap shrink-0"
           >
-            <Sparkles className="w-4 h-4" />
+            <Wand2 className="w-4 h-4" />
             <span>{draftingAi ? labels.generating : labels.aiDraftBtn}</span>
           </button>
         </div>

@@ -71,24 +71,56 @@ Return a JSON object with:
 - badgeMotto: Short 2-4 word English motto (e.g. "Fluency & Bright Minds").`,
     });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: { parts },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            honorTitle: { type: Type.STRING },
-            citationEn: { type: Type.STRING },
-            citationAr: { type: Type.STRING },
-            portraitFramingNote: { type: Type.STRING },
-            badgeMotto: { type: Type.STRING },
+    const attempts = [
+      { model: 'gemini-4-hydrogen', delayMs: 0 },
+      { model: 'gemini-3.1-flash-lite', delayMs: 600 },
+      { model: 'gemini-4-hydrogen', delayMs: 1400 },
+    ];
+
+    let response: Awaited<ReturnType<typeof ai.models.generateContent>> | undefined;
+    let lastError: unknown;
+    for (const step of attempts) {
+      if (step.delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, step.delayMs));
+      }
+      try {
+        response = await ai.models.generateContent({
+          model: step.model,
+          contents: { parts },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                honorTitle: { type: Type.STRING },
+                citationEn: { type: Type.STRING },
+                citationAr: { type: Type.STRING },
+                portraitFramingNote: { type: Type.STRING },
+                badgeMotto: { type: Type.STRING },
+              },
+              required: ['honorTitle', 'citationEn', 'citationAr', 'portraitFramingNote', 'badgeMotto'],
+            },
           },
-          required: ['honorTitle', 'citationEn', 'citationAr', 'portraitFramingNote', 'badgeMotto'],
-        },
-      },
-    });
+        });
+        break;
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err || '');
+        const transient =
+          msg.includes('503') ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('high demand') ||
+          msg.includes('429') ||
+          msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('404') ||
+          msg.includes('NOT_FOUND');
+        if (!transient) throw err;
+      }
+    }
+
+    if (!response) {
+      throw lastError;
+    }
 
     const parsed = JSON.parse((response.text ?? '{}').trim());
     return res.status(200).json(parsed);
