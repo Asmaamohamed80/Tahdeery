@@ -7,39 +7,102 @@ const VISIT_SESSION_KEY = 'lc_visit_logged_v1';
 
 export interface UnlockedState {
   allPaid: boolean;
+  allPaidExpiresAtMs?: number | null;
   ids: string[];
+  itemExpiries?: Record<string, number>;
+}
+
+export function getRemainingDays(expiresAtMs?: number | null): number | null {
+  if (!expiresAtMs || typeof expiresAtMs !== 'number') return null;
+  const diff = expiresAtMs - Date.now();
+  if (diff <= 0) return 0;
+  return Math.ceil(diff / 86400000);
 }
 
 export function getUnlockedState(): UnlockedState {
-  if (typeof window === 'undefined') return { allPaid: false, ids: [] };
+  if (typeof window === 'undefined') return { allPaid: false, ids: [], itemExpiries: {} };
   try {
     const raw = window.localStorage.getItem(UNLOCKED_STORAGE_KEY);
-    if (!raw) return { allPaid: false, ids: [] };
+    if (!raw) return { allPaid: false, ids: [], itemExpiries: {} };
     const parsed = JSON.parse(raw) as Partial<UnlockedState>;
+    const now = Date.now();
+
+    const rawAllExp = typeof parsed.allPaidExpiresAtMs === 'number' ? parsed.allPaidExpiresAtMs : null;
+    const activeAllPaid = Boolean(parsed.allPaid) && (!rawAllExp || rawAllExp > now);
+
+    const rawExpiries =
+      parsed.itemExpiries && typeof parsed.itemExpiries === 'object' ? parsed.itemExpiries : {};
+    const cleanExpiries: Record<string, number> = {};
+    const cleanIds = Array.isArray(parsed.ids)
+      ? parsed.ids.filter((id): id is string => {
+          if (typeof id !== 'string') return false;
+          const exp = rawExpiries[id];
+          if (typeof exp === 'number') {
+            if (exp <= now) return false;
+            cleanExpiries[id] = exp;
+          }
+          return true;
+        })
+      : [];
+
     return {
-      allPaid: Boolean(parsed.allPaid),
-      ids: Array.isArray(parsed.ids) ? parsed.ids.filter((x): x is string => typeof x === 'string') : [],
+      allPaid: activeAllPaid,
+      allPaidExpiresAtMs: activeAllPaid ? rawAllExp : null,
+      ids: cleanIds,
+      itemExpiries: cleanExpiries,
     };
   } catch {
-    return { allPaid: false, ids: [] };
+    return { allPaid: false, ids: [], itemExpiries: {} };
   }
 }
 
 export function isItemUnlocked(state: UnlockedState, itemId: string): boolean {
-  return state.allPaid || state.ids.includes(itemId);
+  const now = Date.now();
+  if (state.allPaid && (!state.allPaidExpiresAtMs || state.allPaidExpiresAtMs > now)) {
+    return true;
+  }
+  if (state.ids.includes(itemId)) {
+    const exp = state.itemExpiries?.[itemId];
+    return !exp || exp > now;
+  }
+  return false;
 }
 
 export function saveUnlockedEntry(
   targetType: ActivationCode['targetType'],
-  targetId: string
+  targetId: string,
+  expiresAtMs?: number | null
 ): UnlockedState {
   const current = getUnlockedState();
+  const isAll = targetType === 'all_paid' || targetId === 'all';
+
+  let nextAllExp = current.allPaidExpiresAtMs ?? null;
+  if (isAll) {
+    if (!expiresAtMs) {
+      nextAllExp = null; // permanent VIP overrides timed
+    } else if (!current.allPaid || (nextAllExp && expiresAtMs > nextAllExp)) {
+      nextAllExp = expiresAtMs;
+    }
+  }
+
+  const nextExpiries: Record<string, number> = { ...(current.itemExpiries || {}) };
+  if (!isAll && targetId) {
+    if (!expiresAtMs) {
+      delete nextExpiries[targetId];
+    } else {
+      const prev = nextExpiries[targetId];
+      if (!prev || expiresAtMs > prev) nextExpiries[targetId] = expiresAtMs;
+    }
+  }
+
   const next: UnlockedState = {
-    allPaid: current.allPaid || targetType === 'all_paid' || targetId === 'all',
+    allPaid: current.allPaid || isAll,
+    allPaidExpiresAtMs: nextAllExp,
     ids:
-      targetId && targetId !== 'all' && !current.ids.includes(targetId)
+      !isAll && targetId && !current.ids.includes(targetId)
         ? [...current.ids, targetId]
         : current.ids,
+    itemExpiries: nextExpiries,
   };
   try {
     window.localStorage.setItem(UNLOCKED_STORAGE_KEY, JSON.stringify(next));
@@ -155,6 +218,16 @@ export async function redeemActivationCode(
       };
     }
 
+    if (data.expiresAtMs && data.expiresAtMs <= Date.now()) {
+      return {
+        ok: false,
+        message:
+          lang === 'ar'
+            ? 'انتهت مدة صلاحية هذا الكود بانتهاء الترم — تواصل مع الإدارة للتجديد.'
+            : 'This activation code has expired.',
+      };
+    }
+
     if (data.usedCount >= data.maxUses) {
       return {
         ok: false,
@@ -167,7 +240,14 @@ export async function redeemActivationCode(
 
     await updateDoc(ref, { usedCount: data.usedCount + 1 });
 
-    const updatedUnlock = saveUnlockedEntry(data.targetType, data.targetId);
+    const effectiveExpiresAtMs =
+      data.expiresAtMs && data.expiresAtMs > Date.now()
+        ? data.expiresAtMs
+        : data.durationDays && data.durationDays > 0
+        ? Date.now() + data.durationDays * 86400000
+        : null;
+
+    const updatedUnlock = saveUnlockedEntry(data.targetType, data.targetId, effectiveExpiresAtMs);
     void trackAnalyticsEvent({
       eventType: 'code_redeem',
       section: 'activation',
@@ -176,14 +256,18 @@ export async function redeemActivationCode(
       lang,
     });
 
+    const daysLeft = getRemainingDays(effectiveExpiresAtMs);
+    const durationNoteAr = daysLeft ? ` (صالح لمدة ${daysLeft} يوم)` : '';
+    const durationNoteEn = daysLeft ? ` (Valid for ${daysLeft} days)` : '';
+
     return {
       ok: true,
       unlockedState: updatedUnlock,
       targetTitle: data.targetTitle,
       message:
         lang === 'ar'
-          ? `تم التفعيل بنجاح! مفتوح الآن: ${data.targetTitle}`
-          : `Unlocked successfully: ${data.targetTitle}`,
+          ? `تم التفعيل بنجاح! مفتوح الآن: ${data.targetTitle}${durationNoteAr}`
+          : `Unlocked successfully: ${data.targetTitle}${durationNoteEn}`,
     };
   } catch (err) {
     console.error('Redeem error:', err);

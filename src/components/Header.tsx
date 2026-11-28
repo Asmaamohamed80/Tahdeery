@@ -80,6 +80,18 @@ export function Header({ lang, user, isAdmin, onOpenAdmin, onSignIn }: HeaderPro
           >
             {labels.navTeacherStudio}
           </a>
+          <a
+            href="#about"
+            className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            {labels.navAbout}
+          </a>
+          <a
+            href="#contact"
+            className="hover:text-sky-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            {labels.navContact}
+          </a>
         </nav>
 
         {/* Zone 3: Single Primary Action */}

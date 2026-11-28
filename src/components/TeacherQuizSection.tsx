@@ -34,6 +34,7 @@ import {
   type TeacherSubscription,
 } from '../types';
 import { t } from '../i18n';
+import { getRemainingDays } from '../utils/analyticsAndUnlock';
 
 interface TeacherQuizSectionProps {
   lang: Lang;
@@ -64,6 +65,7 @@ export function TeacherQuizSection({
 }: TeacherQuizSectionProps) {
   const labels = t(lang);
   const termPrice = settings.quizTermPriceEgp ?? 120;
+  const termDurationDays = settings.termPromoDurationDays ?? 120;
 
   const [subTab, setSubTab] = useState<'builder' | 'analytics'>('builder');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
@@ -93,7 +95,14 @@ export function TeacherQuizSection({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeQuizId, setActiveQuizId] = useState<string>('');
 
-  const hasActiveSub = Boolean(isAdmin || subscription?.active);
+  const remainingSubDays = getRemainingDays(subscription?.expiresAtMs);
+  const isSubExpired = Boolean(
+    !isAdmin &&
+      subscription?.active &&
+      subscription.expiresAtMs &&
+      subscription.expiresAtMs <= Date.now()
+  );
+  const hasActiveSub = Boolean(isAdmin || (subscription?.active && !isSubExpired));
   const hasUsedTrial = useMemo(
     () =>
       Boolean(
@@ -363,7 +372,7 @@ export function TeacherQuizSection({
             <p className="text-xs font-semibold text-sky-900">
               {labels.quizFreeTrialTag} ·{' '}
               <span className="font-mono-num text-amber-700">
-                {termPrice} {labels.egp} / {lang === 'ar' ? 'الترم' : 'Term'}
+                {termPrice} {labels.egp} / {termDurationDays} {lang === 'ar' ? 'يوم' : 'Days'}
               </span>
             </p>
             <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 text-balance">
@@ -394,17 +403,21 @@ export function TeacherQuizSection({
                     itemType: 'quiz_term',
                     itemTitle:
                       lang === 'ar'
-                        ? 'اشتراك الترم — بنك الأسئلة والكويزات التفاعلية'
-                        : 'Full Term Subscription — Quiz Bank & Analytics',
+                        ? `باقة الترم الكاملة (${termDurationDays} يوم) — بنك الأسئلة والكويزات`
+                        : `Full Term Pass (${termDurationDays} Days) — Quiz Bank & Analytics`,
                     amountEgp: termPrice,
-                    extraNote: `Teacher Email: ${user.email || ''} | Teacher UID: ${user.uid}`,
+                    extraNote: `Teacher Email: ${user.email || ''} | Teacher UID: ${user.uid} | Duration: ${termDurationDays} days`,
                   });
                 }}
                 className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-amber-600 rounded-xl hover:bg-amber-700 whitespace-nowrap"
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>
-                  {labels.quizSubscribeTermBtn} · {termPrice} {labels.egp}
+                  {isSubExpired
+                    ? lang === 'ar'
+                      ? `تجديد اشتراك الترم · ${termPrice} ${labels.egp}`
+                      : `Renew Term Pass · ${termPrice} ${labels.egp}`
+                    : `${labels.quizSubscribeTermBtn} · ${termPrice} ${labels.egp}`}
                 </span>
               </button>
             )}
@@ -417,14 +430,28 @@ export function TeacherQuizSection({
             {hasActiveSub ? (
               <span className="font-semibold text-emerald-700">
                 {lang === 'ar'
-                  ? `✓ اشتراك الترم مفعّل (${subscription?.termLabel || 'Active'}) — يمكنك نشر اختبارات غير محدودة وعرض تقارير الطلاب.`
-                  : `✓ Term Subscription Active — Create unlimited quizzes & track live student analytics.`}
+                  ? `✓ اشتراك الترم مفعّل (${subscription?.termLabel || 'Active'})${
+                      remainingSubDays !== null && subscription?.expiresAtMs
+                        ? ` · متبقي ${remainingSubDays} يوم (ينتهي ${new Date(subscription.expiresAtMs).toLocaleDateString('ar-EG')})`
+                        : ''
+                    } — يمكنك نشر اختبارات غير محدودة وعرض تقارير الطلاب.`
+                  : `✓ Term Subscription Active${
+                      remainingSubDays !== null && subscription?.expiresAtMs
+                        ? ` (${remainingSubDays} days left · ends ${new Date(subscription.expiresAtMs).toLocaleDateString('en-US')})`
+                        : ''
+                    } — Create unlimited quizzes & track live student analytics.`}
+              </span>
+            ) : isSubExpired ? (
+              <span className="font-semibold text-rose-700">
+                {lang === 'ar'
+                  ? `انتهت مدة اشتراك الترم السابق تلقائياً (${subscription?.termLabel || ''}) — جدّدي الباقة بـ ${termPrice} ج.م لمدة ${termDurationDays} يوم لإعادة فتح النشر بلا حدود.`
+                  : `Your previous Term Pass expired automatically — renew for ${termPrice} EGP (${termDurationDays} days) to resume unlimited quiz publishing.`}
               </span>
             ) : !user ? (
               <span>
                 {lang === 'ar'
-                  ? `سجّل الدخول بحساب Google لتجربة إنشاء امتحان تجريبي مجاني برابط حقيقي، أو اشترك بالترم بـ ${termPrice} ج.م فقط.`
-                  : `Sign in with Google to build 1 free trial quiz with live analytics, or subscribe for ${termPrice} EGP/term.`}
+                  ? `سجّل الدخول بحساب Google لتجربة إنشاء امتحان تجريبي مجاني برابط حقيقي، أو اشترك بالترم بـ ${termPrice} ج.م (${termDurationDays} يوم).`
+                  : `Sign in with Google to build 1 free trial quiz with live analytics, or subscribe for ${termPrice} EGP (${termDurationDays} days).`}
               </span>
             ) : !hasUsedTrial ? (
               <span className="font-semibold text-sky-900">
@@ -435,8 +462,8 @@ export function TeacherQuizSection({
             ) : (
               <span className="font-semibold text-amber-800">
                 {lang === 'ar'
-                  ? `استخدمت الامتحان التجريبي المجاني. فعّل اشتراك الترم بـ ${termPrice} ج.م فقط لإنشاء اختبارات بلا حدود.`
-                  : `Free trial quiz used. Unlock unlimited term quizzes for ${termPrice} EGP/term.`}
+                  ? `استخدمت الامتحان التجريبي المجاني. فعّل اشتراك الترم بـ ${termPrice} ج.م فقط (${termDurationDays} يوم) لإنشاء اختبارات بلا حدود.`
+                  : `Free trial quiz used. Unlock unlimited term quizzes for ${termPrice} EGP (${termDurationDays} days).`}
               </span>
             )}
           </div>

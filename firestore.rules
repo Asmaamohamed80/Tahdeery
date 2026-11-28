@@ -41,6 +41,8 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
           'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
+          'termPromoEnabled', 'termPromoTitleAr', 'termPromoTitleEn', 'termPromoSubtitleAr',
+          'termPromoSubtitleEn', 'termPromoDurationDays',
           'seeded', 'updatedAt'
         ])
         && data.academyNameEn is string && data.academyNameEn.size() >= 2 && data.academyNameEn.size() <= 100
@@ -52,6 +54,12 @@ service cloud.firestore {
         && data.whiteLabelPriceEgp is number && data.whiteLabelPriceEgp >= 0 && data.whiteLabelPriceEgp <= 100000
         && data.aiCertificatePriceEgp is number && data.aiCertificatePriceEgp >= 0 && data.aiCertificatePriceEgp <= 100000
         && (!data.keys().hasAny(['quizTermPriceEgp']) || (data.quizTermPriceEgp is number && data.quizTermPriceEgp >= 0 && data.quizTermPriceEgp <= 100000))
+        && (!data.keys().hasAny(['termPromoEnabled']) || data.termPromoEnabled is bool)
+        && (!data.keys().hasAny(['termPromoTitleAr']) || (data.termPromoTitleAr is string && data.termPromoTitleAr.size() <= 140))
+        && (!data.keys().hasAny(['termPromoTitleEn']) || (data.termPromoTitleEn is string && data.termPromoTitleEn.size() <= 140))
+        && (!data.keys().hasAny(['termPromoSubtitleAr']) || (data.termPromoSubtitleAr is string && data.termPromoSubtitleAr.size() <= 240))
+        && (!data.keys().hasAny(['termPromoSubtitleEn']) || (data.termPromoSubtitleEn is string && data.termPromoSubtitleEn.size() <= 240))
+        && (!data.keys().hasAny(['termPromoDurationDays']) || (data.termPromoDurationDays is number && data.termPromoDurationDays >= 1 && data.termPromoDurationDays <= 1000))
         && data.seeded is bool
         && data.updatedAt is timestamp;
     }
@@ -103,7 +111,7 @@ service cloud.firestore {
         && data.summaryEn is string && data.summaryEn.size() <= 1000
         && data.summaryAr is string && data.summaryAr.size() <= 1000
         && data.previewExcerpt is string && data.previewExcerpt.size() <= 2000
-        && data.coverUrl is string && data.coverUrl.size() <= 500
+        && data.coverUrl is string && data.coverUrl.size() <= 120000
         && data.isPaid is bool
         && data.priceEgp is number && data.priceEgp >= 0 && data.priceEgp <= 100000
         && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
@@ -121,7 +129,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
-          'descriptionEn', 'descriptionAr', 'contentText',
+          'descriptionEn', 'descriptionAr', 'contentText', 'coverUrl',
           'fileName', 'fileDataUrl', 'externalUrl', 'isPaid', 'priceEgp',
           'authorUid', 'createdAt'
         ])
@@ -132,6 +140,7 @@ service cloud.firestore {
         && data.descriptionEn is string && data.descriptionEn.size() <= 1000
         && data.descriptionAr is string && data.descriptionAr.size() <= 1000
         && data.contentText is string && data.contentText.size() <= 20000
+        && (!data.keys().hasAny(['coverUrl']) || (data.coverUrl is string && data.coverUrl.size() <= 120000))
         && (!data.keys().hasAny(['fileName']) || (data.fileName is string && data.fileName.size() <= 180))
         && (!data.keys().hasAny(['fileDataUrl']) || (data.fileDataUrl is string && data.fileDataUrl.size() <= 920000))
         && (!data.keys().hasAny(['externalUrl']) || (data.externalUrl is string && data.externalUrl.size() >= 8 && data.externalUrl.size() <= 500 && data.externalUrl.matches('^https://.*')))
@@ -350,13 +359,16 @@ service cloud.firestore {
           'ownerUid', 'teacherName', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
         ])
         && data.keys().hasOnly([
-          'ownerUid', 'teacherName', 'teacherEmail', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
+          'ownerUid', 'teacherName', 'teacherEmail', 'termLabel', 'active',
+          'durationDays', 'expiresAtMs', 'activatedByUid', 'activatedAt'
         ])
         && isValidId(data.ownerUid)
         && data.teacherName is string && data.teacherName.size() >= 2 && data.teacherName.size() <= 100
         && (!data.keys().hasAny(['teacherEmail']) || (data.teacherEmail is string && data.teacherEmail.size() <= 160))
         && data.termLabel is string && data.termLabel.size() >= 2 && data.termLabel.size() <= 80
         && data.active is bool
+        && (!data.keys().hasAny(['durationDays']) || (data.durationDays is number && data.durationDays >= 0 && data.durationDays <= 1000))
+        && (!data.keys().hasAny(['expiresAtMs']) || (data.expiresAtMs is number && data.expiresAtMs >= 0))
         && data.activatedByUid is string && data.activatedByUid.size() >= 1 && data.activatedByUid.size() <= 128
         && data.activatedAt is timestamp;
     }
@@ -368,17 +380,20 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'code', 'targetType', 'targetId', 'targetTitle', 'note',
-          'maxUses', 'usedCount', 'active', 'createdByUid', 'createdAt'
+          'maxUses', 'usedCount', 'active', 'durationDays', 'expiresAtMs',
+          'createdByUid', 'createdAt'
         ])
         && isValidId(data.code)
         && data.code.size() >= 4 && data.code.size() <= 64
-        && data.targetType in ['resource', 'pack', 'story', 'all_paid']
+        && data.targetType in ['resource', 'pack', 'story', 'paper', 'all_paid']
         && data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128
         && data.targetTitle is string && data.targetTitle.size() >= 1 && data.targetTitle.size() <= 180
         && (!data.keys().hasAny(['note']) || (data.note is string && data.note.size() <= 160))
         && data.maxUses is number && data.maxUses >= 1 && data.maxUses <= 500
         && data.usedCount is number && data.usedCount >= 0 && data.usedCount <= data.maxUses
         && data.active is bool
+        && (!data.keys().hasAny(['durationDays']) || (data.durationDays is number && data.durationDays >= 0 && data.durationDays <= 1000))
+        && (!data.keys().hasAny(['expiresAtMs']) || (data.expiresAtMs is number && data.expiresAtMs >= 0))
         && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
         && data.createdAt is timestamp;
     }
@@ -408,6 +423,8 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
           'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
+          'termPromoEnabled', 'termPromoTitleAr', 'termPromoTitleEn', 'termPromoSubtitleAr',
+          'termPromoSubtitleEn', 'termPromoDurationDays',
           'seeded', 'updatedAt'
         ]);
       allow delete: if isValidId(settingId) && isAdmin();
@@ -495,7 +512,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'titleEn', 'titleAr', 'categoryEn', 'categoryAr',
-          'descriptionEn', 'descriptionAr', 'contentText',
+          'descriptionEn', 'descriptionAr', 'contentText', 'coverUrl',
           'fileName', 'fileDataUrl', 'externalUrl', 'isPaid', 'priceEgp'
         ]);
       allow delete: if isValidId(paperId) && isAdmin();
@@ -589,7 +606,7 @@ service cloud.firestore {
         && incoming().ownerUid == existing().ownerUid
         && incoming().activatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
-          'teacherName', 'teacherEmail', 'termLabel', 'active', 'activatedByUid', 'activatedAt'
+          'teacherName', 'teacherEmail', 'termLabel', 'active', 'durationDays', 'expiresAtMs', 'activatedByUid', 'activatedAt'
         ]);
       allow delete: if isValidId(uid) && isAdmin();
     }
@@ -649,7 +666,7 @@ service cloud.firestore {
           && incoming().code == existing().code
           && incoming().createdByUid == existing().createdByUid
           && incoming().createdAt == existing().createdAt
-          && incoming().diff(existing()).affectedKeys().hasOnly(['active', 'maxUses', 'note'])
+          && incoming().diff(existing()).affectedKeys().hasOnly(['active', 'maxUses', 'note', 'durationDays', 'expiresAtMs'])
         ) || (
           existing().active == true
           && existing().usedCount < existing().maxUses

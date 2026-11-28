@@ -61,6 +61,24 @@ export function CoursesAffiliateSection({
           )}
         </div>
 
+        {/* Transparent Affiliate Disclosure Notice */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <p>
+            <strong className="text-slate-900">
+              {lang === 'ar' ? 'شفافية الشراكات (Affiliate Disclosure): ' : 'Affiliate Disclosure: '}
+            </strong>
+            {lang === 'ar'
+              ? 'بعض روابط الكورسات الموصى بها أدناه هي روابط شراكة تعليمية (بما في ذلك برامج Impact)، وقد نحصل على عمولة بسيطة عند التسجيل من خلالها دون أي تكلفة إضافية عليك.'
+              : 'Some course links below are affiliate partner links (including Impact partner programs). If you enroll through them, we may earn a commission at no extra cost to you.'}
+          </p>
+          <a
+            href="#about"
+            className="text-sky-900 font-semibold hover:underline underline-offset-4 whitespace-nowrap shrink-0"
+          >
+            {lang === 'ar' ? 'اقرأ المزيد عنا' : 'About Our Policy'}
+          </a>
+        </div>
+
         {/* Track Filter Bar */}
         <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-fit">
           {(

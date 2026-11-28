@@ -20,6 +20,12 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   whiteLabelPriceEgp: 75,
   aiCertificatePriceEgp: 50,
   quizTermPriceEgp: 120,
+  termPromoEnabled: true,
+  termPromoTitleAr: 'اشتراك الترم الكامل — منصة الكويزات وبنك الأسئلة للمعلمين',
+  termPromoTitleEn: 'Full Term Pass — Teacher Quiz Studio & Question Bank',
+  termPromoSubtitleAr: 'افتح اختبارات بلا حدود + تصحيح تلقائي + تقارير درجات الطلاب لمدة ترم كامل، ويتوقف تلقائياً بانتهاء المدة.',
+  termPromoSubtitleEn: 'Unlimited online student quizzes & instant analytics for a full term — auto-expires cleanly at term end.',
+  termPromoDurationDays: 120,
   seeded: false,
 };
 
@@ -347,37 +353,141 @@ export const STARTER_STORIES: Omit<StoryItem, 'authorUid' | 'createdAt'>[] = [
 
 export const STARTER_PAPERS: Omit<OfficialPaper, 'authorUid' | 'createdAt'>[] = [
   {
-    id: 'paper_attendance_grades',
-    titleEn: 'Official Teacher Gradebook & Formative Assessment Sheet',
-    titleAr: 'سجل درجات وتقييمات اللغة الإنجليزية الرسمي',
-    categoryEn: 'Assessment Record',
-    categoryAr: 'سجلات التقييم',
-    descriptionEn: 'Clean printable weekly & monthly score sheet structured for classroom English evaluation (listening, reading, writing, participation).',
-    descriptionAr: 'نموذج منظم لرصد درجات التقييم الأسبوعي والشهري (استماع، قراءة، كتابة، مشاركة).',
-    fileName: 'Official_English_Gradebook_Sheet.html',
+    id: 'paper_senior_teacher_book',
+    titleEn: 'Senior Teacher Book',
+    titleAr: 'كتاب Senior Teacher',
+    categoryEn: 'Teacher Books',
+    categoryAr: 'كتب ومراجع المعلم',
+    descriptionEn:
+      'Comprehensive Senior Teacher reference book for classroom instruction and lesson mastery (upload custom cover & file from Admin).',
+    descriptionAr:
+      'كتاب Senior Teacher الشامل للمعلم — يمكنك رفع صورة الغلاف وملف الكتاب من لوحة الأدمن وتحديد مجاني أو مدفوع.',
+    coverUrl: '',
+    fileName: 'Senior_Teacher_Book.html',
     isPaid: false,
     priceEgp: 0,
-    contentText: `OFFICIAL ENGLISH LANGUAGE ASSESSMENT RECORD
-School: __________________________   Academic Year: 2026 / 2027
-Teacher: _________________________   Grade / Class: _______________
+    contentText: `SENIOR TEACHER BOOK — REFERENCE EDITION
+Prepared for English Teachers & Classroom Instruction.
+Note: Upload your full PDF or Google Drive link and custom book cover from the Admin Panel (Papers & Books tab -> Edit).`,
+  },
+  {
+    id: 'paper_quran_dotted_booklet',
+    titleEn: 'Short Quran Surahs Dotted Tracing Booklet for Kids',
+    titleAr: 'كتيب سور القرآن القصيرة بالتنقيط للأطفال الصغيرين',
+    categoryEn: 'Kids Tracing Booklets',
+    categoryAr: 'كتيبات التأسيس والقرآن',
+    descriptionEn:
+      'Dotted-line handwriting & tracing booklet of short Quran surahs designed for young children learning to write neatly.',
+    descriptionAr:
+      'كتيب لسور القرآن القصيرة مكتوبة بالتنقيط لتدريب الأطفال الصغار على القراءة والكتابة بخط واضح ومرتب.',
+    coverUrl: '',
+    fileName: 'Short_Quran_Surahs_Dotted_Booklet.html',
+    isPaid: false,
+    priceEgp: 0,
+    contentText: `كتيب سور القرآن القصيرة بالتنقيط للأطفال الصغيرين
+اسم الطفل: ________________________   التاريخ: ___ / ___ / 2026
 
-Columns: No. | Student Name | Listening (10) | Reading (10) | Writing (10) | Behavior & Homework (10) | Total (40) | Notes`,
+(١) سورة الإخلاص — تتبّع النقاط واكتب بخط جميل:
+قُلْ هُوَ اللَّهُ أَحَدٌ ۝ اللَّهُ الصَّمَدُ ۝ لَمْ يَلِدْ وَلَمْ يُولَدْ ۝ وَلَمْ يَكُن لَّهُ كُفُوًا أَحَدٌ
+....................................................................................
+....................................................................................
+
+(٢) سورة الفلق — تتبّع النقاط واكتب:
+قُلْ أَعُوذُ بِرَبِّ الْفَلَقِ ۝ مِن شَرِّ مَا خَلَقَ ۝ وَمِن شَرِّ غَاسِقٍ إِذَا وَقَبَ
+....................................................................................
+....................................................................................
+
+(٣) سورة الناس — تتبّع النقاط واكتب:
+قُلْ أَعُوذُ بِرَبِّ النَّاسِ ۝ مَلِكِ النَّاسِ ۝ إِلَٰهِ النَّاسِ
+....................................................................................`,
+  },
+  {
+    id: 'paper_remedial_weak_students',
+    titleEn: 'Remedial Improvement Plan for Struggling Students',
+    titleAr: 'ورقة خطة التحسين للطلاب الضعاف',
+    categoryEn: 'Remedial Plans',
+    categoryAr: 'خطط التحسين والمتابعة',
+    descriptionEn:
+      'Structured diagnostic and 4-week remedial progress sheet to help struggling learners catch up in reading, writing, and spelling.',
+    descriptionAr:
+      'استمارة متابعة وعلاج متكاملة لتشخيص نقاط الضعف لدى الطلاب الضعاف وخطة تحسين أسبوعية قابلة للطباعة.',
+    fileName: 'Remedial_Improvement_Plan_Sheet.html',
+    isPaid: false,
+    priceEgp: 0,
+    contentText: `ورقة خطة التحسين والمتابعة للطلاب الضعاف — REMEDIAL IMPROVEMENT PLAN
+اسم الطالب: ________________________   الفصل/المجموعة: ______________
+المعلم: ____________________________   الشهر: _______________________
+
+أولاً — تشخيص نقاط الضعف:
+[ ] تمييز الحروف والأصوات   [ ] القراءة والدمج   [ ] الإملاء والكتابة   [ ] القواعد الأساسية
+
+ثانياً — سجل المتابعة الأسبوعي للتحسن:
+الأسبوع الأول: الهدف العلاجي: ______________________  التقييم (مقبول / جيد / تحسّن): ________
+الأسبوع الثاني: الهدف العلاجي: ____________________  التقييم (مقبول / جيد / تحسّن): ________
+الأسبوع الثالث: الهدف العلاجي: ____________________  التقييم (مقبول / جيد / تحسّن): ________
+الأسبوع الرابع: الهدف العلاجي: ____________________  التقييم النهائي وتوصية المعلم: ________
+
+توقيع المعلم: ___________________   توقيع ولي الأمر: ___________________`,
+  },
+  {
+    id: 'paper_student_names_roster',
+    titleEn: 'Student Names Roster & Daily Attendance Sheet',
+    titleAr: 'ورقة سجل أسماء التلاميذ والحضور',
+    categoryEn: 'Class Rosters',
+    categoryAr: 'سجلات الأسماء والحضور',
+    descriptionEn:
+      'Clean printable student names roster with phone numbers, daily attendance columns, and teacher notes.',
+    descriptionAr:
+      'كشف منظم لأسماء التلاميذ وأرقام تواصل أولياء الأمور وخانات الحضور والغياب الأسبوعية.',
+    fileName: 'Student_Names_Roster_Sheet.html',
+    isPaid: false,
+    priceEgp: 0,
+    contentText: `ورقة سجل أسماء التلاميذ والحضور — STUDENT ROSTER & ATTENDANCE
+الفصل / المجموعة: ______________________   المعلم: ______________________
+
+م  | اسم التلميذ بالكامل          | هاتف ولي الأمر   | س | ح | ن | ث | ر | خ | ملاحظات
+01 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+02 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+03 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+04 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+05 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+06 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+07 | ____________________________ | ________________ |   |   |   |   |   |   | ____________
+08 | ____________________________ | ________________ |   |   |   |   |   |   | ____________`,
+  },
+  {
+    id: 'paper_attendance_grades',
+    titleEn: 'Student Assessment & Grades Record Sheet',
+    titleAr: 'ورقة تقييم ودرجات التلاميذ',
+    categoryEn: 'Assessment & Grades',
+    categoryAr: 'تقييم ودرجات',
+    descriptionEn:
+      'Clean printable weekly & monthly score sheet structured for reading, writing, dictation, participation, and total grade.',
+    descriptionAr:
+      'نموذج منظم لرصد درجات التقييم الأسبوعي والشهري (قراءة، كتابة، إملاء، مشاركة، المجموع الكلي).',
+    fileName: 'Student_Assessment_Grades_Sheet.html',
+    isPaid: false,
+    priceEgp: 0,
+    contentText: `ورقة تقييم ودرجات التلاميذ — STUDENT ASSESSMENT & GRADES RECORD
+المعلم: _________________________   الفصل / المجموعة: _______________   الشهر: ___________
+
+م | اسم التلميذ | القراءة (10) | الكتابة والخط (10) | الإملاء (10) | المشاركة والواجب (10) | المجموع (40) | التقدير`,
   },
   {
     id: 'paper_pacing_calendar',
-    titleEn: 'Term Curriculum Pacing & Supervisor Inspection Log',
-    titleAr: 'خطة توزيع المنهج وسجل متابعة التوجيه',
+    titleEn: 'Curriculum Pacing & Supervisor Follow-up Log',
+    titleAr: 'خطة توزيع المنهج وسجل المتابعة',
     categoryEn: 'Curriculum Planning',
     categoryAr: 'خطط المنهج',
-    descriptionEn: 'Official pacing template mapping weeks, units, grammar targets, and supervisor remarks.',
-    descriptionAr: 'استمارة رسمية لتوزيع الوحدات على أسابيع الفصل الدراسي وملاحظات التوجيه الفني.',
+    descriptionEn: 'Official pacing template mapping weeks, units, targets, and supervisor remarks.',
+    descriptionAr: 'استمارة رسمية لتوزيع الوحدات على أسابيع الفصل الدراسي وملاحظات المتابعة.',
     fileName: 'Official_Curriculum_Pacing_Log.html',
     isPaid: false,
     priceEgp: 0,
-    contentText: `TERM CURRICULUM PACING & INSPECTION LOG
-Subject: English Language | Term: First / Second
+    contentText: `CURRICULUM PACING & INSPECTION LOG
+Term: First / Second | Teacher: _________________________
 
-Week | Unit & Lessons | Target Grammar & Vocabulary | Teaching Aids | Supervisor Signature`,
+Week | Unit & Lessons | Key Objectives & Vocabulary | Teaching Aids | Supervisor Signature`,
   },
 ];
 

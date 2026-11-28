@@ -7,9 +7,11 @@ import {
   ExternalLink,
   Eye,
   FileText,
+  ImagePlus,
   KeyRound,
   Link2,
   LogOut,
+  Pencil,
   Plus,
   Trash2,
   Upload,
@@ -20,6 +22,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   serverTimestamp,
   setDoc,
@@ -60,7 +63,7 @@ import {
   splitPdfIntoBase64Chunks,
   type PdfChunkPayload,
 } from '../utils/questionBankImporter';
-import { generateRandomActivationCode } from '../utils/analyticsAndUnlock';
+import { generateRandomActivationCode, getRemainingDays } from '../utils/analyticsAndUnlock';
 import { t } from '../i18n';
 
 export type AdminTab =
@@ -107,6 +110,8 @@ interface AdminDashboardModalProps {
   onSeedMissingWorksheetsAndActivities?: () => Promise<void>;
   onSeedStarterPacks?: () => Promise<void>;
   onSeedCoursesAndBank?: () => Promise<void>;
+  onSeedMissingPapers?: () => Promise<void>;
+  onStarterItemDeleted?: (id: string) => void;
 }
 
 export function AdminDashboardModal({
@@ -139,6 +144,8 @@ export function AdminDashboardModal({
   onSeedMissingWorksheetsAndActivities,
   onSeedStarterPacks,
   onSeedCoursesAndBank,
+  onSeedMissingPapers,
+  onStarterItemDeleted,
 }: AdminDashboardModalProps) {
   const labels = t(lang);
   const [tab, setTab] = useState<AdminTab>(initialTab);
@@ -169,6 +176,8 @@ export function AdminDashboardModal({
   const [resExternalUrl, setResExternalUrl] = useState('');
 
   // Story form state
+  const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
+  const [editingStoryAuthorUid, setEditingStoryAuthorUid] = useState<string>('');
   const [stTitleEn, setStTitleEn] = useState('');
   const [stTitleAr, setStTitleAr] = useState('');
   const [stLevel, setStLevel] = useState('Primary 4 – 6');
@@ -176,12 +185,15 @@ export function AdminDashboardModal({
   const [stSummaryAr, setStSummaryAr] = useState('');
   const [stPreview, setStPreview] = useState('');
   const [stCover, setStCover] = useState(STORY_COVER_1);
+  const [stPaid, setStPaid] = useState(true);
   const [stPrice, setStPrice] = useState(65);
   const [stFileName, setStFileName] = useState('');
   const [stFileDataUrl, setStFileDataUrl] = useState('');
   const [stExternalUrl, setStExternalUrl] = useState('');
 
-  // Official paper form state
+  // Official paper & book form state
+  const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
+  const [editingPaperAuthorUid, setEditingPaperAuthorUid] = useState<string>('');
   const [opTitleEn, setOpTitleEn] = useState('');
   const [opTitleAr, setOpTitleAr] = useState('');
   const [opCatEn, setOpCatEn] = useState('Official Form');
@@ -189,6 +201,9 @@ export function AdminDashboardModal({
   const [opDescEn, setOpDescEn] = useState('');
   const [opDescAr, setOpDescAr] = useState('');
   const [opContent, setOpContent] = useState('');
+  const [opCoverUrl, setOpCoverUrl] = useState('');
+  const [opPaid, setOpPaid] = useState(false);
+  const [opPrice, setOpPrice] = useState(50);
   const [opFileName, setOpFileName] = useState('');
   const [opFileDataUrl, setOpFileDataUrl] = useState('');
   const [opExternalUrl, setOpExternalUrl] = useState('');
@@ -211,6 +226,24 @@ export function AdminDashboardModal({
   const [whiteLabelPrice, setWhiteLabelPrice] = useState(settings.whiteLabelPriceEgp);
   const [certPrice, setCertPrice] = useState(settings.aiCertificatePriceEgp);
   const [quizTermPrice, setQuizTermPrice] = useState(settings.quizTermPriceEgp ?? 120);
+  const [termPromoEnabled, setTermPromoEnabled] = useState(settings.termPromoEnabled !== false);
+  const [termPromoDurationDays, setTermPromoDurationDays] = useState(
+    settings.termPromoDurationDays ?? 120
+  );
+  const [termPromoTitleAr, setTermPromoTitleAr] = useState(
+    settings.termPromoTitleAr || 'عرض الترم الكامل — افتحي بنك الأسئلة والاختبارات التفاعلية'
+  );
+  const [termPromoTitleEn, setTermPromoTitleEn] = useState(
+    settings.termPromoTitleEn || 'Full Term Pass — Unlock Question Bank & Live Quizzes'
+  );
+  const [termPromoSubtitleAr, setTermPromoSubtitleAr] = useState(
+    settings.termPromoSubtitleAr ||
+      'اشتراك مرة واحدة طوال الترم يفتح كل اختبارات الطلاب وتصحيحهم التلقائي ثم يقفل تلقائياً بنهاية المدة.'
+  );
+  const [termPromoSubtitleEn, setTermPromoSubtitleEn] = useState(
+    settings.termPromoSubtitleEn ||
+      'One term payment unlocks unlimited live student quizzes and auto-locks automatically when the term ends.'
+  );
 
   // Affiliate Course form state
   const [coTitleAr, setCoTitleAr] = useState('');
@@ -264,12 +297,15 @@ export function AdminDashboardModal({
   const [subNameInput, setSubNameInput] = useState('');
   const [subEmailInput, setSubEmailInput] = useState('');
   const [subTermInput, setSubTermInput] = useState('2026 Term 1');
+  const [subDurationDays, setSubDurationDays] = useState(settings.termPromoDurationDays ?? 120);
 
   // Activation codes form state
   const [codeTargetSelection, setCodeTargetSelection] = useState('all_paid:all');
   const [codeMaxUses, setCodeMaxUses] = useState(1);
+  const [codeDurationDays, setCodeDurationDays] = useState(0);
   const [codeNote, setCodeNote] = useState('');
   const [lastCreatedCode, setLastCreatedCode] = useState('');
+  const [lastCreatedCodeDurationDays, setLastCreatedCodeDurationDays] = useState(0);
 
   // Worksheet Pack & Bulk Sheet upload form state
   const [packNumber, setPackNumber] = useState(packs.length + 1);
@@ -302,6 +338,23 @@ export function AdminDashboardModal({
     setWhiteLabelPrice(settings.whiteLabelPriceEgp);
     setCertPrice(settings.aiCertificatePriceEgp);
     setQuizTermPrice(settings.quizTermPriceEgp ?? 120);
+    setTermPromoEnabled(settings.termPromoEnabled !== false);
+    setTermPromoDurationDays(settings.termPromoDurationDays ?? 120);
+    setTermPromoTitleAr(
+      settings.termPromoTitleAr || 'عرض الترم الكامل — افتحي بنك الأسئلة والاختبارات التفاعلية'
+    );
+    setTermPromoTitleEn(
+      settings.termPromoTitleEn || 'Full Term Pass — Unlock Question Bank & Live Quizzes'
+    );
+    setTermPromoSubtitleAr(
+      settings.termPromoSubtitleAr ||
+        'اشتراك مرة واحدة طوال الترم يفتح كل اختبارات الطلاب وتصحيحهم التلقائي ثم يقفل تلقائياً بنهاية المدة.'
+    );
+    setTermPromoSubtitleEn(
+      settings.termPromoSubtitleEn ||
+        'One term payment unlocks unlimited live student quizzes and auto-locks automatically when the term ends.'
+    );
+    setSubDurationDays(settings.termPromoDurationDays ?? 120);
   }, [settings]);
 
   useEffect(() => {
@@ -436,6 +489,122 @@ export function AdminDashboardModal({
     reader.readAsDataURL(file);
   };
 
+  const handleStoryCoverUpload = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setFeedback(
+        lang === 'ar'
+          ? 'يرجى اختيار ملف صورة لغلاف القصة (JPG أو PNG أو WebP).'
+          : 'Please select an image file (JPG, PNG, or WebP) for the story cover.'
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawUrl = String(reader.result || '');
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 640;
+        const maxH = 480;
+        const ratio = Math.min(maxW / img.width, maxH / img.height, 1);
+        const targetW = Math.max(1, Math.round(img.width * ratio));
+        const targetH = Math.max(1, Math.round(img.height * ratio));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+
+        let compressed = canvas.toDataURL('image/jpeg', 0.84);
+        if (compressed.length > 115000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.7);
+        }
+        if (compressed.length > 115000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.56);
+        }
+        if (compressed.length > 115000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.42);
+        }
+        setStCover(compressed);
+        setFeedback(
+          lang === 'ar'
+            ? 'تم تجهيز صورة الغلاف بنجاح! يمكنك الآن ضبط السعر والضغط على نشر/حفظ القصة.'
+            : 'Custom cover image ready! Set the price and click Publish/Save Story.'
+        );
+      };
+      img.onerror = () => {
+        setFeedback(
+          lang === 'ar' ? 'تعذر قراءة صورة الغلاف، جربي صورة أخرى.' : 'Could not load cover image.'
+        );
+      };
+      img.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handlePaperCoverUpload = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setFeedback(
+        lang === 'ar'
+          ? 'يرجى اختيار ملف صورة للغلاف (JPG أو PNG أو WebP).'
+          : 'Please select an image file (JPG, PNG, or WebP) for the cover.'
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawUrl = String(reader.result || '');
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 640;
+        const maxH = 640;
+        const ratio = Math.min(maxW / img.width, maxH / img.height, 1);
+        const targetW = Math.max(1, Math.round(img.width * ratio));
+        const targetH = Math.max(1, Math.round(img.height * ratio));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+
+        let compressed = canvas.toDataURL('image/jpeg', 0.84);
+        if (compressed.length > 115000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.7);
+        }
+        if (compressed.length > 115000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.56);
+        }
+        if (compressed.length > 115000) {
+          compressed = canvas.toDataURL('image/jpeg', 0.42);
+        }
+        setOpCoverUrl(compressed);
+        setFeedback(
+          lang === 'ar'
+            ? 'تم تجهيز صورة الغلاف بنجاح! اضغطي الآن «حفظ التعديلات» لتثبيتها.'
+            : 'Cover image ready! Click Save to publish it.'
+        );
+      };
+      img.onerror = () => {
+        setFeedback(
+          lang === 'ar' ? 'تعذر قراءة صورة الغلاف، جربي صورة أخرى.' : 'Could not load cover image.'
+        );
+      };
+      img.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleAddResource = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -478,10 +647,13 @@ export function AdminDashboardModal({
     }
   };
 
-  const handleDeleteDoc = async (colName: string, id: string) => {
+  const handleDeleteDoc = async (colName: string, id: string, isStarterOnly = false) => {
     setBusy(true);
     try {
-      await deleteDoc(doc(db, colName, id));
+      if (!isStarterOnly) {
+        await deleteDoc(doc(db, colName, id));
+      }
+      onStarterItemDeleted?.(id);
       setFeedback(lang === 'ar' ? 'تم الحذف نهائياً.' : 'Deleted successfully.');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `${colName}/${id}`);
@@ -640,21 +812,61 @@ export function AdminDashboardModal({
     }
   };
 
-  const handleDeletePackAndItems = async (packId: string) => {
+  const handleDeletePackAndItems = async (pack: WorksheetPack) => {
     setBusy(true);
     try {
-      const batch = writeBatch(db);
-      packItems
-        .filter((s) => s.packId === packId)
-        .forEach((s) => batch.delete(doc(db, 'worksheet_items', s.id)));
-      batch.delete(doc(db, 'worksheet_packs', packId));
-      await batch.commit();
+      const relatedSheets = packItems.filter((s) => s.packId === pack.id);
+      if (pack.authorUid !== 'starter') {
+        const batch = writeBatch(db);
+        relatedSheets
+          .filter((s) => s.authorUid !== 'starter')
+          .forEach((s) => batch.delete(doc(db, 'worksheet_items', s.id)));
+        batch.delete(doc(db, 'worksheet_packs', pack.id));
+        await batch.commit();
+      }
+      onStarterItemDeleted?.(pack.id);
+      relatedSheets.forEach((s) => onStarterItemDeleted?.(s.id));
       setFeedback(lang === 'ar' ? 'تم حذف المجموعة وكل الأوراق بداخلها.' : 'Pack and all sheets deleted.');
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `worksheet_packs/${packId}`);
+      handleFirestoreError(err, OperationType.DELETE, `worksheet_packs/${pack.id}`);
     } finally {
       setBusy(false);
     }
+  };
+
+  const resetStoryForm = () => {
+    setEditingStoryId(null);
+    setEditingStoryAuthorUid('');
+    setStTitleEn('');
+    setStTitleAr('');
+    setStLevel('Primary 4 – 6');
+    setStSummaryEn('');
+    setStSummaryAr('');
+    setStPreview('');
+    setStCover(STORY_COVER_1);
+    setStPaid(true);
+    setStPrice(65);
+    setStFileName('');
+    setStFileDataUrl('');
+    setStExternalUrl('');
+  };
+
+  const handleStartEditStory = (story: StoryItem) => {
+    setEditingStoryId(story.id);
+    setEditingStoryAuthorUid(story.authorUid || '');
+    setStTitleEn(story.titleEn || '');
+    setStTitleAr(story.titleAr || '');
+    setStLevel(story.levelLabel || 'Primary 4 – 6');
+    setStSummaryEn(story.summaryEn || '');
+    setStSummaryAr(story.summaryAr || '');
+    setStPreview(story.previewExcerpt || '');
+    setStCover(story.coverUrl || STORY_COVER_1);
+    setStPaid(Boolean(story.isPaid && story.priceEgp > 0));
+    setStPrice(story.priceEgp ?? 0);
+    setStFileName(story.fileName || '');
+    setStFileDataUrl(story.fileDataUrl || '');
+    setStExternalUrl(story.externalUrl || '');
+    setFeedback('');
   };
 
   const handleAddStory = async (e: React.FormEvent) => {
@@ -662,38 +874,120 @@ export function AdminDashboardModal({
     if (!user) return;
     const validExternal = validateHttpsExternalUrl(stExternalUrl);
     if (validExternal === null) return;
+
+    const numericPrice = Math.min(100000, Math.max(0, Math.round(Number(stPrice) || 0)));
+    const finalIsPaid = stPaid && numericPrice > 0;
+    const finalPrice = finalIsPaid ? numericPrice : 0;
+    const cleanCover = (stCover.trim() || STORY_COVER_1).slice(0, 120000);
+
     setBusy(true);
     try {
-      await addDoc(collection(db, 'stories'), {
-        titleEn: (stTitleEn || stTitleAr).slice(0, 160),
-        titleAr: (stTitleAr || stTitleEn).slice(0, 160),
-        levelLabel: stLevel.slice(0, 60),
-        summaryEn: (stSummaryEn || stSummaryAr).slice(0, 1000),
-        summaryAr: (stSummaryAr || stSummaryEn).slice(0, 1000),
-        previewExcerpt: (stPreview || stSummaryEn || 'Chapter 1 preview...').slice(0, 2000),
-        coverUrl: stCover.slice(0, 500),
-        isPaid: true,
-        priceEgp: Number(stPrice) || 50,
-        ...(stFileName ? { fileName: stFileName.slice(0, 180) } : {}),
-        ...(stFileDataUrl ? { fileDataUrl: stFileDataUrl.slice(0, 920000) } : {}),
-        ...(validExternal ? { externalUrl: validExternal } : {}),
-        authorUid: user.uid,
-        createdAt: serverTimestamp(),
-      });
-      setStTitleEn('');
-      setStTitleAr('');
-      setStSummaryEn('');
-      setStSummaryAr('');
-      setStPreview('');
-      setStFileName('');
-      setStFileDataUrl('');
-      setStExternalUrl('');
-      setFeedback(lang === 'ar' ? 'تمت إضافة القصة بنجاح!' : 'Story added!');
+      if (editingStoryId) {
+        if (editingStoryAuthorUid === 'starter') {
+          await setDoc(doc(db, 'stories', editingStoryId), {
+            titleEn: (stTitleEn || stTitleAr).slice(0, 160),
+            titleAr: (stTitleAr || stTitleEn).slice(0, 160),
+            levelLabel: (stLevel.trim() || 'Primary').slice(0, 60),
+            summaryEn: (stSummaryEn || stSummaryAr).slice(0, 1000),
+            summaryAr: (stSummaryAr || stSummaryEn).slice(0, 1000),
+            previewExcerpt: (stPreview || stSummaryEn || 'Chapter 1 preview...').slice(0, 2000),
+            coverUrl: cleanCover,
+            isPaid: finalIsPaid,
+            priceEgp: finalPrice,
+            ...(stFileName ? { fileName: stFileName.slice(0, 180) } : {}),
+            ...(stFileDataUrl ? { fileDataUrl: stFileDataUrl.slice(0, 920000) } : {}),
+            ...(validExternal ? { externalUrl: validExternal } : {}),
+            authorUid: user.uid,
+            createdAt: serverTimestamp(),
+          });
+        } else {
+          await updateDoc(doc(db, 'stories', editingStoryId), {
+            titleEn: (stTitleEn || stTitleAr).slice(0, 160),
+            titleAr: (stTitleAr || stTitleEn).slice(0, 160),
+            levelLabel: (stLevel.trim() || 'Primary').slice(0, 60),
+            summaryEn: (stSummaryEn || stSummaryAr).slice(0, 1000),
+            summaryAr: (stSummaryAr || stSummaryEn).slice(0, 1000),
+            previewExcerpt: (stPreview || stSummaryEn || 'Chapter 1 preview...').slice(0, 2000),
+            coverUrl: cleanCover,
+            isPaid: finalIsPaid,
+            priceEgp: finalPrice,
+            fileName: stFileName ? stFileName.slice(0, 180) : deleteField(),
+            fileDataUrl: stFileDataUrl ? stFileDataUrl.slice(0, 920000) : deleteField(),
+            externalUrl: validExternal ? validExternal : deleteField(),
+          });
+        }
+        resetStoryForm();
+        setFeedback(
+          lang === 'ar'
+            ? 'تم تحديث القصة والغلاف والسعر بنجاح!'
+            : 'Story cover, price, and details updated!'
+        );
+      } else {
+        await addDoc(collection(db, 'stories'), {
+          titleEn: (stTitleEn || stTitleAr).slice(0, 160),
+          titleAr: (stTitleAr || stTitleEn).slice(0, 160),
+          levelLabel: (stLevel.trim() || 'Primary').slice(0, 60),
+          summaryEn: (stSummaryEn || stSummaryAr).slice(0, 1000),
+          summaryAr: (stSummaryAr || stSummaryEn).slice(0, 1000),
+          previewExcerpt: (stPreview || stSummaryEn || 'Chapter 1 preview...').slice(0, 2000),
+          coverUrl: cleanCover,
+          isPaid: finalIsPaid,
+          priceEgp: finalPrice,
+          ...(stFileName ? { fileName: stFileName.slice(0, 180) } : {}),
+          ...(stFileDataUrl ? { fileDataUrl: stFileDataUrl.slice(0, 920000) } : {}),
+          ...(validExternal ? { externalUrl: validExternal } : {}),
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        resetStoryForm();
+        setFeedback(lang === 'ar' ? 'تمت إضافة القصة بنجاح!' : 'Story added!');
+      }
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'stories');
+      handleFirestoreError(
+        err,
+        editingStoryId ? OperationType.UPDATE : OperationType.CREATE,
+        editingStoryId ? `stories/${editingStoryId}` : 'stories'
+      );
     } finally {
       setBusy(false);
     }
+  };
+
+  const resetPaperForm = () => {
+    setEditingPaperId(null);
+    setEditingPaperAuthorUid('');
+    setOpTitleEn('');
+    setOpTitleAr('');
+    setOpCatEn('Official Form');
+    setOpCatAr('نموذج رسمي');
+    setOpDescEn('');
+    setOpDescAr('');
+    setOpContent('');
+    setOpCoverUrl('');
+    setOpPaid(false);
+    setOpPrice(50);
+    setOpFileName('');
+    setOpFileDataUrl('');
+    setOpExternalUrl('');
+  };
+
+  const handleStartEditPaper = (paper: OfficialPaper) => {
+    setEditingPaperId(paper.id);
+    setEditingPaperAuthorUid(paper.authorUid || '');
+    setOpTitleEn(paper.titleEn || '');
+    setOpTitleAr(paper.titleAr || '');
+    setOpCatEn(paper.categoryEn || 'Official Form');
+    setOpCatAr(paper.categoryAr || 'نموذج رسمي');
+    setOpDescEn(paper.descriptionEn || '');
+    setOpDescAr(paper.descriptionAr || '');
+    setOpContent(paper.contentText || '');
+    setOpCoverUrl(paper.coverUrl || '');
+    setOpPaid(Boolean(paper.isPaid && paper.priceEgp > 0));
+    setOpPrice(paper.priceEgp ?? 0);
+    setOpFileName(paper.fileName || '');
+    setOpFileDataUrl(paper.fileDataUrl || '');
+    setOpExternalUrl(paper.externalUrl || '');
+    setFeedback('');
   };
 
   const handleAddPaper = async (e: React.FormEvent) => {
@@ -701,35 +995,82 @@ export function AdminDashboardModal({
     if (!user) return;
     const validExternal = validateHttpsExternalUrl(opExternalUrl);
     if (validExternal === null) return;
+    const numericPrice = Math.min(100000, Math.max(0, Math.round(Number(opPrice) || 0)));
+    const finalIsPaid = opPaid && numericPrice > 0;
+    const finalPrice = finalIsPaid ? numericPrice : 0;
+    const cleanCover = opCoverUrl.trim().slice(0, 120000);
+
     setBusy(true);
     try {
-      await addDoc(collection(db, 'official_papers'), {
-        titleEn: (opTitleEn || opTitleAr).slice(0, 160),
-        titleAr: (opTitleAr || opTitleEn).slice(0, 160),
-        categoryEn: opCatEn.slice(0, 80),
-        categoryAr: opCatAr.slice(0, 80),
-        descriptionEn: (opDescEn || opDescAr).slice(0, 1000),
-        descriptionAr: (opDescAr || opDescEn).slice(0, 1000),
-        contentText: (opContent || opDescEn || opDescAr || 'Official School Template').slice(0, 20000),
-        ...(opFileName ? { fileName: opFileName.slice(0, 180) } : {}),
-        ...(opFileDataUrl ? { fileDataUrl: opFileDataUrl.slice(0, 920000) } : {}),
-        ...(validExternal ? { externalUrl: validExternal } : {}),
-        isPaid: false,
-        priceEgp: 0,
-        authorUid: user.uid,
-        createdAt: serverTimestamp(),
-      });
-      setOpTitleEn('');
-      setOpTitleAr('');
-      setOpDescEn('');
-      setOpDescAr('');
-      setOpContent('');
-      setOpFileName('');
-      setOpFileDataUrl('');
-      setOpExternalUrl('');
-      setFeedback(lang === 'ar' ? 'تمت إضافة الورقة الرسمية بنجاح!' : 'Official paper added!');
+      if (editingPaperId) {
+        if (editingPaperAuthorUid === 'starter') {
+          await setDoc(doc(db, 'official_papers', editingPaperId), {
+            titleEn: (opTitleEn || opTitleAr).slice(0, 160),
+            titleAr: (opTitleAr || opTitleEn).slice(0, 160),
+            categoryEn: (opCatEn.trim() || 'Official Form').slice(0, 80),
+            categoryAr: (opCatAr.trim() || 'نموذج رسمي').slice(0, 80),
+            descriptionEn: (opDescEn || opDescAr).slice(0, 1000),
+            descriptionAr: (opDescAr || opDescEn).slice(0, 1000),
+            contentText: (opContent || opDescEn || opDescAr || 'Official School Template').slice(0, 20000),
+            ...(cleanCover ? { coverUrl: cleanCover } : {}),
+            ...(opFileName ? { fileName: opFileName.slice(0, 180) } : {}),
+            ...(opFileDataUrl ? { fileDataUrl: opFileDataUrl.slice(0, 920000) } : {}),
+            ...(validExternal ? { externalUrl: validExternal } : {}),
+            isPaid: finalIsPaid,
+            priceEgp: finalPrice,
+            authorUid: user.uid,
+            createdAt: serverTimestamp(),
+          });
+        } else {
+          await updateDoc(doc(db, 'official_papers', editingPaperId), {
+            titleEn: (opTitleEn || opTitleAr).slice(0, 160),
+            titleAr: (opTitleAr || opTitleEn).slice(0, 160),
+            categoryEn: (opCatEn.trim() || 'Official Form').slice(0, 80),
+            categoryAr: (opCatAr.trim() || 'نموذج رسمي').slice(0, 80),
+            descriptionEn: (opDescEn || opDescAr).slice(0, 1000),
+            descriptionAr: (opDescAr || opDescEn).slice(0, 1000),
+            contentText: (opContent || opDescEn || opDescAr || 'Official School Template').slice(0, 20000),
+            coverUrl: cleanCover ? cleanCover : deleteField(),
+            fileName: opFileName ? opFileName.slice(0, 180) : deleteField(),
+            fileDataUrl: opFileDataUrl ? opFileDataUrl.slice(0, 920000) : deleteField(),
+            externalUrl: validExternal ? validExternal : deleteField(),
+            isPaid: finalIsPaid,
+            priceEgp: finalPrice,
+          });
+        }
+        resetPaperForm();
+        setFeedback(
+          lang === 'ar'
+            ? 'تم تحديث الكتاب / الورقة والغلاف بنجاح!'
+            : 'Paper / book cover & details updated!'
+        );
+      } else {
+        await addDoc(collection(db, 'official_papers'), {
+          titleEn: (opTitleEn || opTitleAr).slice(0, 160),
+          titleAr: (opTitleAr || opTitleEn).slice(0, 160),
+          categoryEn: (opCatEn.trim() || 'Official Form').slice(0, 80),
+          categoryAr: (opCatAr.trim() || 'نموذج رسمي').slice(0, 80),
+          descriptionEn: (opDescEn || opDescAr).slice(0, 1000),
+          descriptionAr: (opDescAr || opDescEn).slice(0, 1000),
+          contentText: (opContent || opDescEn || opDescAr || 'Official School Template').slice(0, 20000),
+          ...(cleanCover ? { coverUrl: cleanCover } : {}),
+          ...(opFileName ? { fileName: opFileName.slice(0, 180) } : {}),
+          ...(opFileDataUrl ? { fileDataUrl: opFileDataUrl.slice(0, 920000) } : {}),
+          ...(validExternal ? { externalUrl: validExternal } : {}),
+          isPaid: finalIsPaid,
+          priceEgp: finalPrice,
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        resetPaperForm();
+        setFeedback(lang === 'ar' ? 'تمت إضافة الورقة / الكتاب بنجاح!' : 'Official paper / book added!');
+      }
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'official_papers');
+      handleFirestoreError(
+        err,
+        editingPaperId ? OperationType.UPDATE : OperationType.CREATE,
+        editingPaperId ? `official_papers/${editingPaperId}` : 'official_papers'
+      );
     } finally {
       setBusy(false);
     }
@@ -768,6 +1109,7 @@ export function AdminDashboardModal({
     setFeedback('');
     const cleanEn = (academyNameEn.trim() || settings.academyNameEn).slice(0, 100);
     const cleanAr = (academyNameAr.trim() || settings.academyNameAr).slice(0, 100);
+    const safePromoDays = Math.max(1, Math.min(1000, Number(termPromoDurationDays) || 120));
     try {
       await setDoc(doc(db, 'settings', 'global'), {
         academyNameEn: cleanEn.length >= 2 ? cleanEn : 'LinguaCraft Academy',
@@ -779,13 +1121,19 @@ export function AdminDashboardModal({
         whiteLabelPriceEgp: Number(whiteLabelPrice) || 0,
         aiCertificatePriceEgp: Number(certPrice) || 0,
         quizTermPriceEgp: Number(quizTermPrice) || 0,
+        termPromoEnabled,
+        termPromoDurationDays: safePromoDays,
+        termPromoTitleAr: termPromoTitleAr.trim().slice(0, 140),
+        termPromoTitleEn: termPromoTitleEn.trim().slice(0, 140),
+        termPromoSubtitleAr: termPromoSubtitleAr.trim().slice(0, 240),
+        termPromoSubtitleEn: termPromoSubtitleEn.trim().slice(0, 240),
         seeded: true,
         updatedAt: serverTimestamp(),
       });
       setFeedback(
         lang === 'ar'
-          ? 'تم حفظ اللوجو وإعدادات الدفع والأسعار بنجاح!'
-          : 'Logo, payment & pricing settings saved!'
+          ? 'تم حفظ الإعدادات وإعلان باقة الترم بنجاح!'
+          : 'Settings & Term Offer banner saved!'
       );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'settings/global');
@@ -799,21 +1147,24 @@ export function AdminDashboardModal({
     setBusy(true);
     try {
       if (activateQuizTerm && order.ownerUid) {
+        const termDays = Math.max(1, Math.min(1000, settings.termPromoDurationDays ?? 120));
         const batch = writeBatch(db);
         batch.update(doc(db, 'orders', order.id), { status: 'confirmed' });
         batch.set(doc(db, 'teacher_subscriptions', order.ownerUid), {
           ownerUid: order.ownerUid,
           teacherName: (order.customerName || 'Teacher').slice(0, 100),
-          termLabel: 'Active Term',
+          termLabel: `Term (${termDays}d)`,
           active: true,
+          durationDays: termDays,
+          expiresAtMs: Date.now() + termDays * 86400000,
           activatedByUid: user.uid,
           activatedAt: serverTimestamp(),
         });
         await batch.commit();
         setFeedback(
           lang === 'ar'
-            ? 'تم تأكيد الطلب وتفعيل اشتراك الترم للمعلم فوراً!'
-            : 'Order confirmed & Teacher Term Subscription activated!'
+            ? `تم تأكيد الطلب وتفعيل اشتراك الترم للمعلم لمدة ${termDays} يوم (يقفل تلقائياً عند الانتهاء)!`
+            : `Order confirmed & Teacher Term activated for ${termDays} days!`
         );
       } else {
         await updateDoc(doc(db, 'orders', order.id), { status: 'confirmed' });
@@ -1215,6 +1566,7 @@ export function AdminDashboardModal({
     setBusy(true);
     setFeedback('');
     const targetUid = subUidInput.trim().slice(0, 128);
+    const safeDays = Math.max(0, Math.min(1000, Number(subDurationDays) || 0));
     try {
       await setDoc(doc(db, 'teacher_subscriptions', targetUid), {
         ownerUid: targetUid,
@@ -1222,13 +1574,21 @@ export function AdminDashboardModal({
         ...(subEmailInput.trim() ? { teacherEmail: subEmailInput.trim().slice(0, 160) } : {}),
         termLabel: (subTermInput.trim() || 'Active Term').slice(0, 80),
         active: true,
+        durationDays: safeDays,
+        ...(safeDays > 0 ? { expiresAtMs: Date.now() + safeDays * 86400000 } : {}),
         activatedByUid: user.uid,
         activatedAt: serverTimestamp(),
       });
       setSubUidInput('');
       setSubNameInput('');
       setSubEmailInput('');
-      setFeedback(lang === 'ar' ? 'تم تفعيل اشتراك المعلم للترم بنجاح!' : 'Teacher subscription activated!');
+      setFeedback(
+        lang === 'ar'
+          ? safeDays > 0
+            ? `تم تفعيل اشتراك المعلم لمدة ${safeDays} يوم (يقفل تلقائياً بنهاية المدة)!`
+            : 'تم تفعيل اشتراك المعلم (مفتوح) بنجاح!'
+          : 'Teacher subscription activated!'
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `teacher_subscriptions/${targetUid}`);
     } finally {
@@ -1239,9 +1599,21 @@ export function AdminDashboardModal({
   const handleToggleSubscription = async (sub: TeacherSubscription) => {
     if (!user) return;
     setBusy(true);
+    const willActivate = !sub.active;
+    const renewDays =
+      sub.durationDays && sub.durationDays > 0
+        ? sub.durationDays
+        : settings.termPromoDurationDays ?? 120;
+    const isExpired = Boolean(sub.expiresAtMs && sub.expiresAtMs <= Date.now());
     try {
       await updateDoc(doc(db, 'teacher_subscriptions', sub.id), {
-        active: !sub.active,
+        active: willActivate || isExpired,
+        ...(willActivate || isExpired
+          ? {
+              durationDays: renewDays,
+              expiresAtMs: Date.now() + renewDays * 86400000,
+            }
+          : {}),
         activatedByUid: user.uid,
         activatedAt: serverTimestamp(),
       });
@@ -1273,10 +1645,14 @@ export function AdminDashboardModal({
       } else if (targetType === 'story') {
         const st = stories.find((s) => s.id === targetId);
         if (st) targetTitle = lang === 'ar' ? st.titleAr : st.titleEn;
+      } else if (targetType === 'paper') {
+        const pp = papers.find((p) => p.id === targetId);
+        if (pp) targetTitle = lang === 'ar' ? pp.titleAr : pp.titleEn;
       }
 
       const newCode = generateRandomActivationCode('LC');
       const safeUses = Math.max(1, Math.min(500, Number(codeMaxUses) || 1));
+      const safeDays = Math.max(0, Math.min(1000, Number(codeDurationDays) || 0));
       await setDoc(doc(db, 'activation_codes', newCode), {
         code: newCode,
         targetType,
@@ -1286,15 +1662,20 @@ export function AdminDashboardModal({
         maxUses: safeUses,
         usedCount: 0,
         active: true,
+        durationDays: safeDays,
+        ...(safeDays > 0 ? { expiresAtMs: Date.now() + safeDays * 86400000 } : {}),
         createdByUid: user.uid,
         createdAt: serverTimestamp(),
       });
 
       setLastCreatedCode(newCode);
+      setLastCreatedCodeDurationDays(safeDays);
       setCodeNote('');
       setFeedback(
         lang === 'ar'
-          ? `تم توليد الكود (${newCode}) بنجاح! انسخيه وأرسليه للعميل على واتساب.`
+          ? safeDays > 0
+            ? `تم توليد الكود (${newCode}) بصلاحية ${safeDays} يوم ويقفل تلقائياً بعدها!`
+            : `تم توليد الكود (${newCode}) بنجاح! انسخيه وأرسليه للعميل على واتساب.`
           : `Activation code ${newCode} generated!`
       );
     } catch (err) {
@@ -1481,11 +1862,11 @@ export function AdminDashboardModal({
                     ['analytics', lang === 'ar' ? 'الزيارات والتحميلات' : 'Analytics'],
                     ['codes', lang === 'ar' ? 'أكواد التفعيل' : 'Activation Codes'],
                     ['resources', lang === 'ar' ? 'الصفوف والتحضير' : 'Grades & Preps'],
-                    ['packs', lang === 'ar' ? 'مجموعات أوراق العمل' : 'Worksheet Packs'],
+                    ['packs', lang === 'ar' ? `مجموعات أوراق العمل (${packs.length})` : `Worksheet Packs (${packs.length})`],
                     ['quizbank', lang === 'ar' ? 'بنك الأسئلة والاشتراكات' : 'Question Bank & Subs'],
                     ['courses', lang === 'ar' ? 'الكورسات (Affiliate)' : 'Affiliate Courses'],
                     ['stories', lang === 'ar' ? 'القصص' : 'Stories'],
-                    ['papers', lang === 'ar' ? 'الأوراق الرسمية' : 'Official Papers'],
+                    ['papers', lang === 'ar' ? `الأوراق والكتب (${papers.length})` : `Papers & Books (${papers.length})`],
                     ['news', lang === 'ar' ? 'الأخبار' : 'News'],
                     ['links', lang === 'ar' ? 'روابط البوستات' : 'Post Links'],
                     ['settings', lang === 'ar' ? 'الإعدادات واللوجو والأسعار' : 'Logo, InstaPay & Pricing'],
@@ -1553,6 +1934,32 @@ export function AdminDashboardModal({
                           {lang === 'ar'
                             ? 'إضافة نماذج أوراق العمل والأنشطة العادية'
                             : 'Add Starter Worksheets & Printable Activities'}
+                        </button>
+                      )}
+                    {onSeedMissingPapers &&
+                      (!papers.some((p) => p.id === 'paper_senior_teacher_book') ||
+                        !papers.some((p) => p.id === 'paper_quran_dotted_booklet')) && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusy(true);
+                            try {
+                              await onSeedMissingPapers();
+                              setFeedback(
+                                lang === 'ar'
+                                  ? 'تمت إضافة كتاب Senior Teacher وكتيب القرآن بالتنقيط وأوراق التحسين والسجلات!'
+                                  : 'Added Senior Teacher book, Quran dotted booklet, and teacher record sheets!'
+                              );
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className="px-3.5 py-2 text-xs font-semibold bg-amber-100 text-amber-900 rounded-lg hover:bg-amber-200 transition-colors"
+                        >
+                          {lang === 'ar'
+                            ? 'إضافة كتاب Senior Teacher وكتيب القرآن والسجلات'
+                            : 'Add Books, Quran Booklet & Sheets'}
                         </button>
                       )}
                   </>
@@ -1826,6 +2233,20 @@ export function AdminDashboardModal({
 
             {tab === 'packs' && (
               <div className="space-y-6">
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-sky-950 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'هذا التبويب يطابق قسم «مكتبة أوراق العمل وحزم التأسيس المرقّمة» في الصفحة الرئيسية. أما كتاب Senior Teacher وكتيب القرآن وسجل الطلاب ففي تبويب «الأوراق والكتب».'
+                      : 'Matches the Worksheet & Foundation Packs section on the homepage. Books, Quran booklet, and student sheets are under Papers & Books.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setTab('papers')}
+                    className="px-3 py-1.5 text-xs font-semibold text-sky-900 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 whitespace-nowrap"
+                  >
+                    {lang === 'ar' ? `الانتقال إلى الأوراق والكتب (${papers.length})` : `Go to Papers & Books (${papers.length})`}
+                  </button>
+                </div>
                 {!hasCloudPacks && onSeedStarterPacks && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-xs text-amber-950 font-medium">
@@ -2127,16 +2548,14 @@ export function AdminDashboardModal({
                                   {pack.isPaid ? `${pack.priceEgp} ${labels.egp}` : labels.freeLabel}
                                 </p>
                               </div>
-                              {hasCloudPacks && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeletePackAndItems(pack.id)}
-                                  className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg shrink-0"
-                                  title={lang === 'ar' ? 'حذف الحزمة بالكامل' : 'Delete pack'}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePackAndItems(pack)}
+                                className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg shrink-0"
+                                title={lang === 'ar' ? 'حذف الحزمة بالكامل' : 'Delete pack'}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
 
                             {sheets.length > 0 && (
@@ -2173,15 +2592,15 @@ export function AdminDashboardModal({
                                         <Eye className="w-3 h-3" />
                                         <span>{lang === 'ar' ? 'عرض' : 'View'}</span>
                                       </button>
-                                      {hasCloudPacks && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteDoc('worksheet_items', sheet.id)}
-                                          className="text-rose-600 hover:text-rose-800 p-1"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleDeleteDoc('worksheet_items', sheet.id, sheet.authorUid === 'starter')
+                                        }
+                                        className="text-rose-600 hover:text-rose-800 p-1"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
                                     </div>
                                   </div>
                                 ))}
@@ -2198,9 +2617,27 @@ export function AdminDashboardModal({
             {tab === 'stories' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <form onSubmit={handleAddStory} className="lg:col-span-5 bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {lang === 'ar' ? 'إضافة قصة إنجليزية (مدفوعة)' : 'Add Paid English Story'}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      {editingStoryId
+                        ? lang === 'ar'
+                          ? 'تعديل بيانات القصة والغلاف والسعر'
+                          : 'Edit Story Details, Cover & Price'
+                        : lang === 'ar'
+                        ? 'إضافة قصة إنجليزية جديدة'
+                        : 'Add New English Story'}
+                    </h3>
+                    {editingStoryId && (
+                      <button
+                        type="button"
+                        onClick={resetStoryForm}
+                        className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100"
+                      >
+                        {lang === 'ar' ? 'إلغاء التعديل' : 'Cancel Edit'}
+                      </button>
+                    )}
+                  </div>
+
                   <input
                     type="text"
                     required
@@ -2217,30 +2654,134 @@ export function AdminDashboardModal({
                     onChange={(e) => setStTitleEn(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                   />
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      value={stLevel}
-                      onChange={(e) => setStLevel(e.target.value)}
-                      placeholder="Level (e.g. Primary 4)"
-                      className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
-                    />
-                    <input
-                      type="number"
-                      value={stPrice}
-                      onChange={(e) => setStPrice(Number(e.target.value))}
-                      placeholder="Price EGP"
-                      className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
-                    />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'المرحلة / المستوى' : 'Level Label'}
+                      </label>
+                      <input
+                        type="text"
+                        value={stLevel}
+                        onChange={(e) => setStLevel(e.target.value)}
+                        placeholder="Primary 4 – 6"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'السعر بالجنيه (0 = مجانية)' : 'Price EGP (0 = Free)'}
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100000}
+                        disabled={!stPaid}
+                        value={stPaid ? stPrice : 0}
+                        onChange={(e) => {
+                          const val = Math.max(0, Number(e.target.value) || 0);
+                          setStPrice(val);
+                          if (val === 0) setStPaid(false);
+                        }}
+                        placeholder="65"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono-num disabled:bg-slate-100 disabled:text-slate-400"
+                      />
+                    </div>
                   </div>
-                  <select
-                    value={stCover}
-                    onChange={(e) => setStCover(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
-                  >
-                    <option value={STORY_COVER_1}>Cover: Magical Library Balloon</option>
-                    <option value={STORY_COVER_2}>Cover: Lighthouse Voyage</option>
-                  </select>
+
+                  <label className="flex items-center justify-between gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs cursor-pointer">
+                    <span className="font-semibold text-slate-800">
+                      {lang === 'ar'
+                        ? 'قصة مدفوعة (يفتح بالشراء أو كود التفعيل)'
+                        : 'Paid Story (Requires InstaPay / Code)'}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={stPaid}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setStPaid(next);
+                        if (next && stPrice <= 0) setStPrice(65);
+                      }}
+                      className="rounded border-slate-300 text-sky-900"
+                    />
+                  </label>
+
+                  {/* Custom Cover Image Upload + Built-in Covers + Preview */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2.5">
+                    <p className="text-xs font-bold text-slate-800">
+                      {lang === 'ar' ? 'صورة غلاف القصة:' : 'Story Cover Image:'}
+                    </p>
+                    <div className="flex items-start gap-3">
+                      <div className="w-24 aspect-[4/3] rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
+                        <img
+                          src={stCover || STORY_COVER_1}
+                          alt="Story cover preview"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <label className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-900 bg-sky-50 border border-dashed border-sky-300 rounded-lg cursor-pointer hover:bg-sky-100 transition-colors">
+                          <ImagePlus className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">
+                            {lang === 'ar'
+                              ? 'رفع صورة غلاف من جهازك'
+                              : 'Upload Cover From Device'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              handleStoryCoverUpload(e.target.files?.[0]);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                        <select
+                          value={
+                            stCover === STORY_COVER_1 || stCover === STORY_COVER_2
+                              ? stCover
+                              : '__custom__'
+                          }
+                          onChange={(e) => {
+                            if (e.target.value !== '__custom__') {
+                              setStCover(e.target.value);
+                            }
+                          }}
+                          className="w-full px-2.5 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-lg text-slate-700"
+                        >
+                          {stCover !== STORY_COVER_1 && stCover !== STORY_COVER_2 && (
+                            <option value="__custom__">
+                              {lang === 'ar' ? '✓ صورة مخصصة مرفوعة حالياً' : '✓ Custom Uploaded Cover'}
+                            </option>
+                          )}
+                          <option value={STORY_COVER_1}>
+                            {lang === 'ar' ? 'غلاف جاهز 1: مكتبة البالون السحرية' : 'Preset 1: Magical Library Balloon'}
+                          </option>
+                          <option value={STORY_COVER_2}>
+                            {lang === 'ar' ? 'غلاف جاهز 2: رحلة المنارة' : 'Preset 2: Lighthouse Voyage'}
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                    {!stCover.startsWith('data:') && (
+                      <input
+                        type="url"
+                        dir="ltr"
+                        value={stCover === STORY_COVER_1 || stCover === STORY_COVER_2 ? '' : stCover}
+                        onChange={(e) => setStCover(e.target.value || STORY_COVER_1)}
+                        placeholder={
+                          lang === 'ar'
+                            ? 'أو الصقي رابط صورة غلاف مباشر (https://...)'
+                            : 'Or paste direct image URL (https://...)'
+                        }
+                        className="w-full px-2.5 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-lg font-mono-num"
+                      />
+                    )}
+                  </div>
+
                   <textarea
                     rows={2}
                     placeholder={lang === 'ar' ? 'ملخص القصة' : 'Summary'}
@@ -2320,31 +2861,61 @@ export function AdminDashboardModal({
                   <button
                     type="submit"
                     disabled={busy}
-                    className="w-full px-4 py-2.5 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800"
+                    className="w-full px-4 py-2.5 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800 disabled:opacity-60"
                   >
-                    {lang === 'ar' ? 'نشر القصة' : 'Publish Story'}
+                    {editingStoryId
+                      ? lang === 'ar'
+                        ? 'حفظ تعديلات القصة الآن'
+                        : 'Save Story Changes'
+                      : lang === 'ar'
+                      ? 'نشر القصة'
+                      : 'Publish Story'}
                   </button>
                 </form>
 
                 <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
                   {stories.map((story) => (
                     <div key={story.id} className="p-3.5 flex items-center justify-between gap-3 bg-white">
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-semibold text-slate-900 truncate">
-                          {lang === 'ar' ? story.titleAr : story.titleEn}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {story.levelLabel} · {story.priceEgp} EGP
-                        </p>
-                        <p className="text-[11px] text-slate-500 truncate">
-                          {story.fileDataUrl
-                            ? `📎 ${story.fileName || (lang === 'ar' ? 'ملف القصة مرفق' : 'Story file attached')}`
-                            : story.externalUrl
-                            ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
-                            : `📝 ${lang === 'ar' ? 'مقتطف نصي فقط' : 'Excerpt only'}`}
-                        </p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={story.coverUrl || STORY_COVER_1}
+                          alt={lang === 'ar' ? story.titleAr : story.titleEn}
+                          referrerPolicy="no-referrer"
+                          className="w-14 h-11 rounded-lg object-cover border border-slate-200 shrink-0 bg-slate-100"
+                        />
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {lang === 'ar' ? story.titleAr : story.titleEn}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {story.levelLabel} ·{' '}
+                            <span className={story.isPaid && story.priceEgp > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-emerald-700'}>
+                              {story.isPaid && story.priceEgp > 0
+                                ? `${story.priceEgp} EGP`
+                                : lang === 'ar'
+                                ? 'مجاني'
+                                : 'Free'}
+                            </span>
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {story.fileDataUrl
+                              ? `📎 ${story.fileName || (lang === 'ar' ? 'ملف القصة مرفق' : 'Story file attached')}`
+                              : story.externalUrl
+                              ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
+                              : `📝 ${lang === 'ar' ? 'مقتطف نصي فقط' : 'Excerpt only'}`}
+                          </p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditStory(story)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                          title={lang === 'ar' ? 'تعديل الغلاف أو السعر' : 'Edit cover or price'}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'تعديل' : 'Edit'}</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -2376,23 +2947,55 @@ export function AdminDashboardModal({
             )}
 
             {tab === 'papers' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="space-y-4">
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-sky-950 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'هذا التبويب يطابق قسم «كتب وأوراق ونماذج المعلم» في الصفحة الرئيسية (Senior Teacher، سور القرآن بالتنقيط، خطة التحسين، سجل التلاميذ، الدرجات). أما مجموعات التأسيس المرقّمة ففي تبويب «مجموعات أوراق العمل».'
+                      : 'Matches Books & Teacher Papers on the homepage. Numbered foundation worksheet packs are under Worksheet Packs.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setTab('packs')}
+                    className="px-3 py-1.5 text-xs font-semibold text-sky-900 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 whitespace-nowrap"
+                  >
+                    {lang === 'ar' ? `الانتقال إلى مجموعات التأسيس (${packs.length})` : `Go to Worksheet Packs (${packs.length})`}
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <form onSubmit={handleAddPaper} className="lg:col-span-5 bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {lang === 'ar' ? 'إضافة ورقة رسمية / نموذج' : 'Add Official Paper / Form'}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      {editingPaperId
+                        ? lang === 'ar'
+                          ? 'تعديل الكتاب / الورقة والغلاف'
+                          : 'Edit Book / Paper & Cover'
+                        : lang === 'ar'
+                        ? 'إضافة كتاب / كتيب / ورقة رسمية'
+                        : 'Add Book, Booklet, or Official Paper'}
+                    </h3>
+                    {editingPaperId && (
+                      <button
+                        type="button"
+                        onClick={resetPaperForm}
+                        className="text-xs font-semibold text-rose-700 hover:underline"
+                      >
+                        {lang === 'ar' ? 'إلغاء التعديل' : 'Cancel Edit'}
+                      </button>
+                    )}
+                  </div>
+
                   <input
                     type="text"
                     required
-                    placeholder={lang === 'ar' ? 'العنوان بالعربية' : 'Arabic Title'}
+                    placeholder={lang === 'ar' ? 'العنوان بالعربية (مثلاً: كتاب Senior Teacher)' : 'Arabic Title'}
                     value={opTitleAr}
                     onChange={(e) => setOpTitleAr(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                   />
                   <input
                     type="text"
-                    required
-                    placeholder={lang === 'ar' ? 'العنوان بالإنجليزية' : 'English Title'}
+                    placeholder={lang === 'ar' ? 'العنوان بالإنجليزية (اختياري)' : 'English Title (Optional)'}
                     value={opTitleEn}
                     onChange={(e) => setOpTitleEn(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
@@ -2402,7 +3005,7 @@ export function AdminDashboardModal({
                       type="text"
                       value={opCatAr}
                       onChange={(e) => setOpCatAr(e.target.value)}
-                      placeholder="التصنيف بالعربية"
+                      placeholder="التصنيف بالعربية (اختياري)"
                       className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                     />
                     <input
@@ -2415,15 +3018,137 @@ export function AdminDashboardModal({
                   </div>
                   <textarea
                     rows={3}
-                    placeholder={lang === 'ar' ? 'الوصف أو محتوى الورقة' : 'Description / Template text'}
+                    placeholder={
+                      lang === 'ar'
+                        ? 'وصف مختصر أو نص الورقة القابل للطباعة'
+                        : 'Short description or printable template text'
+                    }
                     value={opContent}
                     onChange={(e) => {
                       setOpContent(e.target.value);
-                      setOpDescAr(e.target.value.slice(0, 140));
-                      setOpDescEn(e.target.value.slice(0, 140));
+                      if (!editingPaperId) {
+                        setOpDescAr(e.target.value.slice(0, 140));
+                        setOpDescEn(e.target.value.slice(0, 140));
+                      }
                     }}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                   />
+                  {editingPaperId && (
+                    <input
+                      type="text"
+                      placeholder={lang === 'ar' ? 'الوصف الظاهر في البطاقة (عربي)' : 'Card description'}
+                      value={opDescAr}
+                      onChange={(e) => {
+                        setOpDescAr(e.target.value);
+                        setOpDescEn(e.target.value);
+                      }}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    />
+                  )}
+
+                  {/* Cover Image Upload (Optional — ideal for Senior Teacher & Quran Dotted Booklet) */}
+                  <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-800">
+                        {lang === 'ar' ? 'صورة الغلاف (اختياري — ارفعيها من جهازك)' : 'Cover Image (Optional)'}
+                      </span>
+                      {opCoverUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setOpCoverUrl('')}
+                          className="text-[11px] font-semibold text-rose-600 hover:underline"
+                        >
+                          {lang === 'ar' ? 'إزالة الغلاف' : 'Remove Cover'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {opCoverUrl ? (
+                        <img
+                          src={opCoverUrl}
+                          alt="Paper cover preview"
+                          referrerPolicy="no-referrer"
+                          className="w-16 h-20 object-cover rounded-lg border border-slate-200 bg-slate-100 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-16 h-20 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center px-1 shrink-0">
+                          {lang === 'ar' ? 'بدون غلاف' : 'No cover'}
+                        </div>
+                      )}
+                      <label className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-semibold text-sky-900 bg-sky-50 border border-dashed border-sky-300 rounded-lg cursor-pointer hover:bg-sky-100">
+                        <ImagePlus className="w-4 h-4 shrink-0" />
+                        <span>
+                          {opCoverUrl
+                            ? lang === 'ar'
+                              ? 'تغيير صورة الغلاف'
+                              : 'Change Cover'
+                            : lang === 'ar'
+                            ? 'رفع صورة الغلاف من جهازك'
+                            : 'Upload Cover Image'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            handlePaperCoverUpload(e.target.files?.[0]);
+                            e.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Free / Paid & Price Settings */}
+                  <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-800">
+                        {lang === 'ar' ? 'التسعير' : 'Pricing'}
+                      </span>
+                      <div className="inline-flex p-0.5 bg-slate-100 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpPaid(false);
+                            setOpPrice(0);
+                          }}
+                          className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                            !opPaid ? 'bg-emerald-700 text-white' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {lang === 'ar' ? 'مجاني' : 'Free'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpPaid(true);
+                            if (opPrice <= 0) setOpPrice(50);
+                          }}
+                          className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                            opPaid ? 'bg-amber-600 text-white' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {lang === 'ar' ? 'مدفوع' : 'Paid'}
+                        </button>
+                      </div>
+                    </div>
+                    {opPaid && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <label className="text-xs font-medium text-slate-600 shrink-0">
+                          {lang === 'ar' ? 'السعر (ج.م):' : 'Price (EGP):'}
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100000}
+                          value={opPrice}
+                          onChange={(e) => setOpPrice(Number(e.target.value))}
+                          className="w-28 px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg font-mono-num"
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <label className="flex items-center gap-2 px-3 py-2 text-xs bg-white border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50">
                     <Upload className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     <span className="truncate">{opFileName || (lang === 'ar' ? 'رفع ملف (حتى 650 كيلوبايت)' : 'Attach file (up to 650KB)')}</span>
@@ -2488,29 +3213,71 @@ export function AdminDashboardModal({
                     disabled={busy}
                     className="w-full px-4 py-2.5 text-xs font-semibold bg-sky-900 text-white rounded-lg hover:bg-sky-800"
                   >
-                    {lang === 'ar' ? 'نشر الورقة الرسمية' : 'Publish Official Paper'}
+                    {editingPaperId
+                      ? lang === 'ar'
+                        ? 'حفظ التعديلات على الكتاب / الورقة'
+                        : 'Save Changes'
+                      : lang === 'ar'
+                      ? 'نشر الورقة / الكتاب'
+                      : 'Publish Paper / Book'}
                   </button>
                 </form>
 
-                <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
+                <div className="lg:col-span-7 divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden max-h-[640px] overflow-y-auto">
                   {papers.map((paper) => (
                     <div key={paper.id} className="p-3.5 flex items-center justify-between gap-3 bg-white">
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-semibold text-slate-900 truncate">
-                          {lang === 'ar' ? paper.titleAr : paper.titleEn}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {lang === 'ar' ? paper.categoryAr : paper.categoryEn}
-                        </p>
-                        <p className="text-[11px] text-slate-500 truncate">
-                          {paper.fileDataUrl
-                            ? `📎 ${paper.fileName || (lang === 'ar' ? 'ملف مرفق' : 'File attached')}`
-                            : paper.externalUrl
-                            ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
-                            : `📝 ${lang === 'ar' ? 'نص فقط' : 'Text only'}`}
-                        </p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        {paper.coverUrl ? (
+                          <img
+                            src={paper.coverUrl}
+                            alt={lang === 'ar' ? paper.titleAr : paper.titleEn}
+                            referrerPolicy="no-referrer"
+                            className="w-12 h-14 rounded-lg object-cover border border-slate-200 shrink-0 bg-slate-100"
+                          />
+                        ) : (
+                          <div className="w-12 h-14 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center px-1 shrink-0">
+                            {lang === 'ar' ? 'بلا غلاف' : 'No cover'}
+                          </div>
+                        )}
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {lang === 'ar' ? paper.titleAr : paper.titleEn}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {lang === 'ar' ? paper.categoryAr : paper.categoryEn} ·{' '}
+                            <span
+                              className={
+                                paper.isPaid && paper.priceEgp > 0
+                                  ? 'font-semibold text-amber-700'
+                                  : 'font-semibold text-emerald-700'
+                              }
+                            >
+                              {paper.isPaid && paper.priceEgp > 0
+                                ? `${paper.priceEgp} EGP`
+                                : lang === 'ar'
+                                ? 'مجاني'
+                                : 'Free'}
+                            </span>
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {paper.fileDataUrl
+                              ? `📎 ${paper.fileName || (lang === 'ar' ? 'ملف مرفق' : 'File attached')}`
+                              : paper.externalUrl
+                              ? `🔗 ${lang === 'ar' ? 'رابط Google Drive' : 'External link'}`
+                              : `📝 ${lang === 'ar' ? 'نص جاهز للطباعة' : 'Printable text'}`}
+                          </p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditPaper(paper)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                          title={lang === 'ar' ? 'تعديل الغلاف أو الملف أو السعر' : 'Edit cover, file, or price'}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'تعديل' : 'Edit'}</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -2529,7 +3296,9 @@ export function AdminDashboardModal({
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDeleteDoc('official_papers', paper.id)}
+                          onClick={() =>
+                            handleDeleteDoc('official_papers', paper.id, paper.authorUid === 'starter')
+                          }
                           className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -2537,6 +3306,7 @@ export function AdminDashboardModal({
                       </div>
                     </div>
                   ))}
+                </div>
                 </div>
               </div>
             )}
@@ -2802,6 +3572,103 @@ export function AdminDashboardModal({
                     />
                   </div>
                 </div>
+
+                {/* Term Promo Banner & Auto-Expiry Settings */}
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950">
+                        {lang === 'ar'
+                          ? 'إعلان باقة الترم في أعلى الموقع والمدة التلقائية'
+                          : 'Homepage Term Offer Banner & Auto-Expiry'}
+                      </h4>
+                      <p className="text-[11px] text-amber-900/80">
+                        {lang === 'ar'
+                          ? 'يعرض السعر (مثلاً 120 ج.م) والمدة (مثلاً 120 يوم) في أعلى المنصة ويغلق الاشتراك تلقائياً عند انتهاء المدة.'
+                          : 'Displays the term offer strip on the homepage and automatically locks subscriptions after N days.'}
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-amber-950 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={termPromoEnabled}
+                        onChange={(e) => setTermPromoEnabled(e.target.checked)}
+                        className="rounded border-amber-400 text-amber-700"
+                      />
+                      <span>{lang === 'ar' ? 'إظهار الإعلان في الرئيسية' : 'Show Banner'}</span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'مدة الترم بالأيام (يقفل بعدها تلقائياً)' : 'Term Duration (Days)'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={termPromoDurationDays}
+                        onChange={(e) => setTermPromoDurationDays(Number(e.target.value) || 120)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono-num"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'عنوان الإعلان بالعربي' : 'Arabic Banner Headline'}
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={140}
+                        value={termPromoTitleAr}
+                        onChange={(e) => setTermPromoTitleAr(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'عنوان الإعلان بالإنجليزي' : 'English Banner Headline'}
+                      </label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        maxLength={140}
+                        value={termPromoTitleEn}
+                        onChange={(e) => setTermPromoTitleEn(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'وصف الإعلان بالعربي' : 'Arabic Banner Subtitle'}
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={240}
+                        value={termPromoSubtitleAr}
+                        onChange={(e) => setTermPromoSubtitleAr(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'وصف الإعلان بالإنجليزي' : 'English Banner Subtitle'}
+                      </label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        maxLength={240}
+                        value={termPromoSubtitleEn}
+                        onChange={(e) => setTermPromoSubtitleEn(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <button
                   type="submit"
                   disabled={busy}
@@ -3255,6 +4122,22 @@ export function AdminDashboardModal({
                           onChange={(e) => setSubTermInput(e.target.value)}
                           className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                         />
+                        <div className="sm:col-span-2">
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            {lang === 'ar' ? 'مدة الاشتراك (يقفل تلقائياً بعدها)' : 'Subscription Duration (Auto-Lock)'}
+                          </label>
+                          <select
+                            value={subDurationDays}
+                            onChange={(e) => setSubDurationDays(Number(e.target.value))}
+                            className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                          >
+                            <option value={30}>{lang === 'ar' ? '30 يوم (شهر واحد)' : '30 Days (1 Month)'}</option>
+                            <option value={90}>{lang === 'ar' ? '90 يوم (3 شهور)' : '90 Days (3 Months)'}</option>
+                            <option value={120}>{lang === 'ar' ? '120 يوم (ترم دراسي كامل)' : '120 Days (Full Term)'}</option>
+                            <option value={180}>{lang === 'ar' ? '180 يوم (نصف عام)' : '180 Days (6 Months)'}</option>
+                            <option value={0}>{lang === 'ar' ? 'مفتوح بدون انتهاء زمني' : 'No Expiry (Permanent)'}</option>
+                          </select>
+                        </div>
                       </div>
                       <button
                         type="submit"
@@ -3271,34 +4154,59 @@ export function AdminDashboardModal({
                           {lang === 'ar' ? 'لا يوجد معلمون مشتركين بعد.' : 'No active teacher subscriptions yet.'}
                         </p>
                       ) : (
-                        subscriptions.map((sub) => (
-                          <div key={sub.id} className="p-3 bg-white flex items-center justify-between gap-2 text-xs">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-slate-900 truncate">{sub.teacherName}</p>
-                              <p className="text-slate-500 truncate">
-                                {sub.termLabel} · {sub.active ? 'Active' : 'Paused'} ·{' '}
-                                <span className="font-mono">{sub.ownerUid}</span>
-                              </p>
+                        subscriptions.map((sub) => {
+                          const remDays = getRemainingDays(sub.expiresAtMs);
+                          const isExpired = Boolean(sub.active && sub.expiresAtMs && sub.expiresAtMs <= Date.now());
+                          return (
+                            <div key={sub.id} className="p-3 bg-white flex items-center justify-between gap-2 text-xs">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-900 truncate">{sub.teacherName}</p>
+                                <p className="text-slate-500 truncate">
+                                  {sub.termLabel} ·{' '}
+                                  {isExpired ? (
+                                    <span className="text-rose-700 font-semibold">
+                                      {lang === 'ar' ? 'منتهي تلقائياً' : 'Expired'}
+                                    </span>
+                                  ) : sub.active ? (
+                                    <span className="text-emerald-700 font-semibold">
+                                      {remDays !== null
+                                        ? lang === 'ar'
+                                          ? `نشط · متبقي ${remDays} يوم`
+                                          : `Active · ${remDays}d left`
+                                        : lang === 'ar'
+                                        ? 'نشط'
+                                        : 'Active'}
+                                    </span>
+                                  ) : (
+                                    <span>{lang === 'ar' ? 'متوقف' : 'Paused'}</span>
+                                  )}{' '}
+                                  · <span className="font-mono">{sub.ownerUid}</span>
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleToggleSubscription(sub)}
+                                className={`px-2.5 py-1 rounded font-semibold shrink-0 ${
+                                  sub.active && !isExpired
+                                    ? 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                }`}
+                              >
+                                {sub.active && !isExpired
+                                  ? lang === 'ar'
+                                    ? 'إيقاف'
+                                    : 'Pause'
+                                  : isExpired
+                                  ? lang === 'ar'
+                                    ? 'تجديد المدة'
+                                    : 'Renew'
+                                  : lang === 'ar'
+                                  ? 'تفعيل'
+                                  : 'Activate'}
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => void handleToggleSubscription(sub)}
-                              className={`px-2.5 py-1 rounded font-semibold shrink-0 ${
-                                sub.active
-                                  ? 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                              }`}
-                            >
-                              {sub.active
-                                ? lang === 'ar'
-                                  ? 'إيقاف'
-                                  : 'Pause'
-                                : lang === 'ar'
-                                ? 'تفعيل'
-                                : 'Activate'}
-                            </button>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -3769,13 +4677,20 @@ export function AdminDashboardModal({
                             [{lang === 'ar' ? 'قصة' : 'Story'}] {lang === 'ar' ? s.titleAr : s.titleEn}
                           </option>
                         ))}
+                      {papers
+                        .filter((pp) => pp.isPaid)
+                        .map((pp) => (
+                          <option key={pp.id} value={`paper:${pp.id}`}>
+                            [{lang === 'ar' ? 'كتاب/ورقة' : 'Book/Paper'}] {lang === 'ar' ? pp.titleAr : pp.titleEn}
+                          </option>
+                        ))}
                     </select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        {lang === 'ar' ? 'أقصى عدد مرات استخدام' : 'Max Uses'}
+                        {lang === 'ar' ? 'أقصى عدد استخدام' : 'Max Uses'}
                       </label>
                       <input
                         type="number"
@@ -3785,6 +4700,22 @@ export function AdminDashboardModal({
                         onChange={(e) => setCodeMaxUses(Number(e.target.value) || 1)}
                         className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        {lang === 'ar' ? 'مدة الصلاحية (توقيت آلي)' : 'Auto-Expiry Duration'}
+                      </label>
+                      <select
+                        value={codeDurationDays}
+                        onChange={(e) => setCodeDurationDays(Number(e.target.value))}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      >
+                        <option value={0}>{lang === 'ar' ? 'دائم (للملفات الفردية)' : 'Permanent'}</option>
+                        <option value={30}>{lang === 'ar' ? '30 يوم (شهر)' : '30 Days'}</option>
+                        <option value={90}>{lang === 'ar' ? '90 يوم (3 شهور)' : '90 Days'}</option>
+                        <option value={120}>{lang === 'ar' ? '120 يوم (ترم كامل)' : '120 Days (Term)'}</option>
+                        <option value={180}>{lang === 'ar' ? '180 يوم (نصف عام)' : '180 Days'}</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -3820,10 +4751,18 @@ export function AdminDashboardModal({
                         <button
                           type="button"
                           onClick={() => {
+                            const expirySuffixAr =
+                              lastCreatedCodeDurationDays > 0
+                                ? `\nمدة الصلاحية: ${lastCreatedCodeDurationDays} يوم (يقفل تلقائياً بعدها).`
+                                : '';
+                            const expirySuffixEn =
+                              lastCreatedCodeDurationDays > 0
+                                ? `\nValid for ${lastCreatedCodeDurationDays} days (auto-expires afterwards).`
+                                : '';
                             const msg =
                               lang === 'ar'
-                                ? `تم تأكيد الدفع! كود التفعيل الخاص بك هو: ${lastCreatedCode}\nادخلي على الموقع واضغطي (تفعيل بكود) في الشريط العلوي لفتح الملف فوراً:\nhttps://tahdeery.vercel.app`
-                                : `Your activation code is: ${lastCreatedCode}\nOpen https://tahdeery.vercel.app and click "Redeem Code" to unlock immediately.`;
+                                ? `تم تأكيد الدفع! كود التفعيل الخاص بك هو: ${lastCreatedCode}${expirySuffixAr}\nادخلي على الموقع واضغطي (تفعيل بكود) في الشريط العلوي لفتح المحتوى فوراً:\nhttps://tahdeery.vercel.app`
+                                : `Your activation code is: ${lastCreatedCode}${expirySuffixEn}\nOpen https://tahdeery.vercel.app and click "Redeem Code" to unlock immediately.`;
                             void navigator.clipboard.writeText(msg);
                             setCopiedKey(`code_${lastCreatedCode}`);
                             setTimeout(() => setCopiedKey(''), 2000);
@@ -3861,7 +4800,10 @@ export function AdminDashboardModal({
                         : 'No activation codes generated yet.'}
                     </p>
                   ) : (
-                    activationCodes.map((c) => (
+                    activationCodes.map((c) => {
+                      const remDays = getRemainingDays(c.expiresAtMs);
+                      const isExpired = Boolean(c.expiresAtMs && c.expiresAtMs <= Date.now());
+                      return (
                       <div
                         key={c.id}
                         className="p-3.5 bg-white border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-3"
@@ -3873,7 +4815,7 @@ export function AdminDashboardModal({
                             </span>
                             <span
                               className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
-                                c.active && c.usedCount < c.maxUses
+                                c.active && !isExpired && c.usedCount < c.maxUses
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : 'bg-slate-200 text-slate-600'
                               }`}
@@ -3881,6 +4823,15 @@ export function AdminDashboardModal({
                               {c.usedCount} / {c.maxUses}{' '}
                               {lang === 'ar' ? 'استخدام' : 'uses'}
                             </span>
+                            {isExpired ? (
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-rose-100 text-rose-700">
+                                {lang === 'ar' ? 'منتهي الصلاحية' : 'Expired'}
+                              </span>
+                            ) : remDays !== null ? (
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-mono-num">
+                                {lang === 'ar' ? `متبقي ${remDays} يوم` : `${remDays}d left`}
+                              </span>
+                            ) : null}
                           </div>
                           <p className="text-xs font-medium text-slate-700 truncate">
                             {c.targetTitle}
@@ -3924,7 +4875,8 @@ export function AdminDashboardModal({
                           </button>
                         </div>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

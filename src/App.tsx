@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -83,6 +83,7 @@ import {
 import { t } from './i18n';
 import { downloadTextOrHtmlFile } from './utils/download';
 import {
+  getRemainingDays,
   getUnlockedState,
   isItemUnlocked,
   redeemActivationCode,
@@ -104,6 +105,7 @@ import { IqChallengeSection } from './components/IqChallengeSection';
 import { KidsCodingGameSection } from './components/KidsCodingGameSection';
 import { EnglishGamesSection } from './components/EnglishGamesSection';
 import { DecisionLabSection } from './components/DecisionLabSection';
+import { AboutAndContactSection } from './components/AboutAndContactSection';
 import { AdminDashboardModal, type AdminTab } from './components/AdminDashboardModal';
 
 export default function App() {
@@ -128,6 +130,33 @@ export default function App() {
   const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [cloudLoaded, setCloudLoaded] = useState(false);
+  const [cloudPapersLoaded, setCloudPapersLoaded] = useState(false);
+  const [cloudPacksLoaded, setCloudPacksLoaded] = useState(false);
+  const [deletedStarterIds, setDeletedStarterIds] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem('lc_deleted_starter_ids_v1');
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const syncedMissingCatalogRef = useRef(false);
+
+  const deletedStarterSet = useMemo(() => new Set(deletedStarterIds), [deletedStarterIds]);
+
+  const markStarterItemDeleted = (id: string) => {
+    setDeletedStarterIds((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      try {
+        window.localStorage.setItem('lc_deleted_starter_ids_v1', JSON.stringify(next));
+      } catch {
+        // Ignore storage error
+      }
+      return next;
+    });
+  };
 
   // Visitor role guidance (non-destructive: highlights recommended tools without hiding any sections)
   const [visitorRole, setVisitorRole] = useState<VisitorRole>(() => {
@@ -276,12 +305,25 @@ export default function App() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'stories')
     );
 
+    const toMillis = (ts: unknown): number => {
+      if (
+        ts &&
+        typeof ts === 'object' &&
+        'toMillis' in ts &&
+        typeof (ts as { toMillis: () => number }).toMillis === 'function'
+      ) {
+        return (ts as { toMillis: () => number }).toMillis();
+      }
+      return 0;
+    };
+
     const unsubPapers = onSnapshot(
-      query(collection(db, 'official_papers'), orderBy('createdAt', 'desc')),
+      collection(db, 'official_papers'),
       (snap) => {
-        setCloudPapers(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<OfficialPaper, 'id'>) }))
-        );
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<OfficialPaper, 'id'>) }));
+        list.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+        setCloudPapers(list);
+        setCloudPapersLoaded(true);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'official_papers')
     );
@@ -297,21 +339,25 @@ export default function App() {
     );
 
     const unsubPacks = onSnapshot(
-      query(collection(db, 'worksheet_packs'), orderBy('packNumber', 'asc')),
+      collection(db, 'worksheet_packs'),
       (snap) => {
-        setCloudPacks(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorksheetPack, 'id'>) }))
-        );
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorksheetPack, 'id'>) }));
+        list.sort((a, b) => (a.packNumber || 0) - (b.packNumber || 0));
+        setCloudPacks(list);
+        setCloudPacksLoaded(true);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'worksheet_packs')
     );
 
     const unsubPackItems = onSnapshot(
-      query(collection(db, 'worksheet_items'), orderBy('itemOrder', 'asc')),
+      collection(db, 'worksheet_items'),
       (snap) => {
-        setCloudPackItems(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorksheetPackItem, 'id'>) }))
-        );
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<WorksheetPackItem, 'id'>),
+        }));
+        list.sort((a, b) => (a.itemOrder || 0) - (b.itemOrder || 0));
+        setCloudPackItems(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'worksheet_items')
     );
@@ -604,7 +650,7 @@ export default function App() {
     let ops = 0;
 
     STARTER_WORKSHEET_PACKS.forEach((pack) => {
-      if (!existingPackIds.has(pack.id)) {
+      if (!existingPackIds.has(pack.id) && !deletedStarterSet.has(pack.id)) {
         const { id, ...rest } = pack;
         batch.set(doc(db, 'worksheet_packs', id), {
           ...rest,
@@ -616,7 +662,11 @@ export default function App() {
     });
 
     STARTER_WORKSHEET_ITEMS.forEach((sheet) => {
-      if (!existingSheetIds.has(sheet.id)) {
+      if (
+        !existingSheetIds.has(sheet.id) &&
+        !deletedStarterSet.has(sheet.id) &&
+        !deletedStarterSet.has(sheet.packId)
+      ) {
         const { id, ...rest } = sheet;
         batch.set(doc(db, 'worksheet_items', id), {
           ...rest,
@@ -668,6 +718,29 @@ export default function App() {
     }
   };
 
+  const handleSeedMissingPapers = async () => {
+    if (!user || !isAdmin) return;
+    const existingPaperIds = new Set(cloudPapers.map((p) => p.id));
+    const batch = writeBatch(db);
+    let ops = 0;
+
+    STARTER_PAPERS.forEach((paper) => {
+      if (!existingPaperIds.has(paper.id) && !deletedStarterSet.has(paper.id)) {
+        const { id, ...rest } = paper;
+        batch.set(doc(db, 'official_papers', id), {
+          ...rest,
+          authorUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+        ops++;
+      }
+    });
+
+    if (ops > 0) {
+      await batch.commit();
+    }
+  };
+
   // Auto-seed starter catalog once when admin first signs in if database hasn't been seeded yet
   useEffect(() => {
     if (cloudLoaded && isAdmin && !settings.seeded && cloudResources.length === 0) {
@@ -676,7 +749,26 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudLoaded, isAdmin, settings.seeded]);
 
-  // Display starter items seamlessly if not seeded yet; once seeded, Firestore is source of truth
+  // Reliably sync any newly added starter books/papers & foundation packs to Firestore once loaded
+  useEffect(() => {
+    if (
+      !cloudLoaded ||
+      !cloudPapersLoaded ||
+      !cloudPacksLoaded ||
+      !isAdmin ||
+      !settings.seeded ||
+      syncedMissingCatalogRef.current
+    ) {
+      return;
+    }
+    syncedMissingCatalogRef.current = true;
+    Promise.all([handleSeedMissingPapers(), handleSeedStarterPacks()]).catch((err) =>
+      console.error('Auto sync catalog error:', err)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudLoaded, cloudPapersLoaded, cloudPacksLoaded, isAdmin, settings.seeded]);
+
+  // Display starter items seamlessly; always merge unsynced starter items so Homepage & Admin stay 100% identical
   const resources: GradeResource[] = useMemo(() => {
     if (settings.seeded || cloudResources.length > 0) return cloudResources;
     return STARTER_RESOURCES.map((r) => ({ ...r, authorUid: 'starter' }));
@@ -688,9 +780,12 @@ export default function App() {
   }, [settings.seeded, cloudStories]);
 
   const papers: OfficialPaper[] = useMemo(() => {
-    if (settings.seeded || cloudPapers.length > 0) return cloudPapers;
-    return STARTER_PAPERS.map((p) => ({ ...p, authorUid: 'starter' }));
-  }, [settings.seeded, cloudPapers]);
+    const cloudIds = new Set(cloudPapers.map((p) => p.id));
+    const missingStarterPapers = STARTER_PAPERS.filter(
+      (p) => !cloudIds.has(p.id) && !deletedStarterSet.has(p.id)
+    ).map((p) => ({ ...p, authorUid: 'starter' }));
+    return [...cloudPapers, ...missingStarterPapers];
+  }, [cloudPapers, deletedStarterSet]);
 
   const news: NewsItem[] = useMemo(() => {
     if (settings.seeded || cloudNews.length > 0) return cloudNews;
@@ -698,14 +793,27 @@ export default function App() {
   }, [settings.seeded, cloudNews]);
 
   const packs: WorksheetPack[] = useMemo(() => {
-    if (cloudPacks.length > 0) return cloudPacks;
-    return STARTER_WORKSHEET_PACKS.map((p) => ({ ...p, authorUid: 'starter' }));
-  }, [cloudPacks]);
+    const cloudIds = new Set(cloudPacks.map((p) => p.id));
+    const missingStarterPacks = STARTER_WORKSHEET_PACKS.filter(
+      (p) => !cloudIds.has(p.id) && !deletedStarterSet.has(p.id)
+    ).map((p) => ({ ...p, authorUid: 'starter' }));
+    return [...cloudPacks, ...missingStarterPacks].sort(
+      (a, b) => (a.packNumber || 0) - (b.packNumber || 0)
+    );
+  }, [cloudPacks, deletedStarterSet]);
 
   const packItems: WorksheetPackItem[] = useMemo(() => {
-    if (cloudPackItems.length > 0) return cloudPackItems;
-    return STARTER_WORKSHEET_ITEMS.map((i) => ({ ...i, authorUid: 'starter' }));
-  }, [cloudPackItems]);
+    const cloudIds = new Set(cloudPackItems.map((i) => i.id));
+    const missingStarterItems = STARTER_WORKSHEET_ITEMS.filter(
+      (i) =>
+        !cloudIds.has(i.id) &&
+        !deletedStarterSet.has(i.id) &&
+        !deletedStarterSet.has(i.packId)
+    ).map((i) => ({ ...i, authorUid: 'starter' }));
+    return [...cloudPackItems, ...missingStarterItems].sort(
+      (a, b) => (a.itemOrder || 0) - (b.itemOrder || 0)
+    );
+  }, [cloudPackItems, deletedStarterSet]);
 
   const courses: AffiliateCourse[] = useMemo(() => {
     if (cloudCourses.length > 0) return cloudCourses;
@@ -911,7 +1019,16 @@ export default function App() {
               <span>{lang === 'ar' ? 'تفعيل بكود' : 'Redeem Code'}</span>
               {(unlockedState.allPaid || unlockedState.ids.length > 0) && (
                 <span className="text-[11px] text-emerald-700 font-mono-num">
-                  · {unlockedState.allPaid ? (lang === 'ar' ? 'شامل' : 'VIP') : unlockedState.ids.length}
+                  ·{' '}
+                  {unlockedState.allPaid
+                    ? (() => {
+                        const remDays = getRemainingDays(unlockedState.allPaidExpiresAtMs);
+                        if (remDays !== null) {
+                          return lang === 'ar' ? `شامل (${remDays} يوم)` : `VIP (${remDays}d)`;
+                        }
+                        return lang === 'ar' ? 'شامل' : 'VIP';
+                      })()
+                    : unlockedState.ids.length}
                 </span>
               )}
             </button>
@@ -1045,19 +1162,22 @@ export default function App() {
             )}
           </div>
 
-          {/* Mobile & Tablet Horizontal Quick-Jump Strip */}
-          <div className="lg:hidden w-full flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-slate-200/70">
+          {/* Quick-Jump Strip Across All Sections (Desktop + Mobile) */}
+          <div className="w-full flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-slate-200/70">
             {[
-              { id: 'classroom-gallery', ar: 'فصولنا', en: 'Classrooms' },
               { id: 'grades', ar: 'الصفوف', en: 'Grades' },
-              { id: 'english-games', ar: 'ألعاب الإنجليزي', en: 'English Games' },
-              { id: 'quiz-builder', ar: 'بنك الكويزات', en: 'Quiz Bank' },
+              { id: 'worksheet-library', ar: 'حزم التأسيس والأوراق', en: 'Foundation Packs' },
+              { id: 'papers-news', ar: 'الكتب وأوراق المعلم', en: 'Books & Papers' },
               { id: 'stories', ar: 'القصص', en: 'Stories' },
-              { id: 'worksheet-library', ar: 'حزم الورق', en: 'Packs' },
+              { id: 'quiz-builder', ar: 'بنك الكويزات', en: 'Quiz Bank' },
+              { id: 'english-games', ar: 'ألعاب الإنجليزي', en: 'English Games' },
               { id: 'iq-tests', ar: 'الذكاء', en: 'IQ Lab' },
               { id: 'coding-game', ar: 'البرمجة', en: 'Coding' },
               { id: 'decision-lab', ar: 'صنّاع القرار', en: 'Decision Lab' },
               { id: 'teacher-studio', ar: 'تحضير المعلم', en: 'Studio' },
+              { id: 'courses', ar: 'الكورسات', en: 'Courses' },
+              { id: 'about', ar: 'عن الأكاديمية', en: 'About' },
+              { id: 'contact', ar: 'تواصل معنا', en: 'Contact' },
             ].map((item) => (
               <button
                 key={item.id}
@@ -1071,6 +1191,81 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Term Offer Announcement Strip (Editable from Admin Settings, Auto-Locks After Duration) */}
+      {settings.termPromoEnabled !== false && (
+        <div className="bg-amber-50/85 border-b border-amber-200/90">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
+            <div className="space-y-0.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-amber-950">
+                <span className="font-mono-num px-2 py-0.5 bg-amber-600 text-white rounded">
+                  {settings.quizTermPriceEgp ?? 120} {labels.egp} ·{' '}
+                  {settings.termPromoDurationDays ?? 120} {lang === 'ar' ? 'يوم' : 'Days'}
+                </span>
+                <span className="text-sm font-bold text-slate-900">
+                  {(lang === 'ar' ? settings.termPromoTitleAr : settings.termPromoTitleEn) ||
+                    (lang === 'ar'
+                      ? 'عرض الترم الكامل — افتحي بنك الأسئلة والاختبارات التفاعلية'
+                      : 'Full Term Pass — Unlock Question Bank & Live Quizzes')}
+                </span>
+              </div>
+              <p className="text-xs text-slate-700 leading-relaxed">
+                {(lang === 'ar' ? settings.termPromoSubtitleAr : settings.termPromoSubtitleEn) ||
+                  (lang === 'ar'
+                    ? 'اشتراك مرة واحدة طوال الترم يفتح كل اختبارات الطلاب وتصحيحهم التلقائي ثم يقفل تلقائياً بنهاية المدة.'
+                    : 'One term payment unlocks unlimited live student quizzes and auto-locks automatically when the term ends.')}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const termPrice = settings.quizTermPriceEgp ?? 120;
+                  const termDays = settings.termPromoDurationDays ?? 120;
+                  if (!user || !user.emailVerified) {
+                    void handleSignIn();
+                    return;
+                  }
+                  setPaymentIntent({
+                    itemType: 'quiz_term',
+                    itemTitle:
+                      lang === 'ar'
+                        ? `باقة الترم الكاملة (${termDays} يوم) — بنك الأسئلة والكويزات`
+                        : `Full Term Pass (${termDays} Days) — Quiz Bank & Analytics`,
+                    amountEgp: termPrice,
+                    extraNote: `Teacher Email: ${user.email || ''} | Teacher UID: ${user.uid} | Duration: ${termDays} days`,
+                  });
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-sky-900 rounded-lg hover:bg-sky-800 whitespace-nowrap"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>
+                  {!user || !user.emailVerified
+                    ? lang === 'ar'
+                      ? `سجّل دخول واشترك بالترم (${settings.quizTermPriceEgp ?? 120} ${labels.egp})`
+                      : `Sign In & Subscribe (${settings.quizTermPriceEgp ?? 120} ${labels.egp})`
+                    : lang === 'ar'
+                    ? `اشترك بالترم الآن · ${settings.quizTermPriceEgp ?? 120} ${labels.egp}`
+                    : `Subscribe Term Pass · ${settings.quizTermPriceEgp ?? 120} ${labels.egp}`}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCodeModalFeedback(null);
+                  setCodeModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-950 bg-white border border-amber-300 rounded-lg hover:bg-amber-100/70 whitespace-nowrap"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>{lang === 'ar' ? 'تفعيل بكود زمني' : 'Activate Timed Code'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hero Split */}
       <section className="py-10 sm:py-16 bg-white border-b border-slate-200">
@@ -1339,7 +1534,7 @@ export default function App() {
               <div className="p-5 flex-1 flex flex-col justify-between gap-4">
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-sky-900">
-                    {lang === 'ar' ? 'ابتدائي وإعدادي · بنك الأسئلة' : 'Primary & Prep · Interactive Quizzes'}
+                    {lang === 'ar' ? 'كل الصفوف الدراسية · بنك الأسئلة' : 'All Grade Levels · Interactive Quizzes'}
                   </p>
                   <h3 className="text-base font-bold text-slate-900">
                     {lang === 'ar' ? 'تدريب إلكتروني فوري بالتابلت والهاتف' : 'Self-Grading Tablet Practice'}
@@ -1785,6 +1980,7 @@ export default function App() {
           setAdminInitialTab('packs');
           setAdminOpen(true);
         }}
+        onJumpToPapers={() => scrollToTargetSection('papers-news')}
         onRequestPayment={(intent) => setPaymentIntent(intent)}
       />
 
@@ -1835,9 +2031,13 @@ export default function App() {
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <span>{story.levelLabel}</span>
                         <span aria-hidden="true">·</span>
-                        <span className="font-semibold text-amber-700 font-mono-num">
-                          {story.priceEgp} {labels.egp}
-                        </span>
+                        {!story.isPaid || story.priceEgp <= 0 ? (
+                          <span className="font-semibold text-emerald-700">{labels.freeLabel}</span>
+                        ) : (
+                          <span className="font-semibold text-amber-700 font-mono-num">
+                            {story.priceEgp} {labels.egp}
+                          </span>
+                        )}
                       </div>
                       <h3 className="text-lg font-bold text-slate-900">
                         {lang === 'ar' ? story.titleAr : story.titleEn}
@@ -1856,7 +2056,7 @@ export default function App() {
                         <BookOpen className="w-3.5 h-3.5" />
                         <span>{labels.readExcerpt}</span>
                       </button>
-                      {isItemUnlocked(unlockedState, story.id) ? (
+                      {!story.isPaid || story.priceEgp <= 0 || isItemUnlocked(unlockedState, story.id) ? (
                         <button
                           type="button"
                           onClick={() =>
@@ -1876,8 +2076,20 @@ export default function App() {
                           }
                           className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 rounded-xl hover:bg-emerald-600 whitespace-nowrap"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{lang === 'ar' ? 'مفعّلة — تحميل القصة' : 'Unlocked — Download Story'}</span>
+                          {!story.isPaid || story.priceEgp <= 0 ? (
+                            <Download className="w-3.5 h-3.5" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {!story.isPaid || story.priceEgp <= 0
+                              ? lang === 'ar'
+                                ? 'تحميل القصة مجاناً'
+                                : 'Download Free Story'
+                              : lang === 'ar'
+                              ? 'مفعّلة — تحميل القصة'
+                              : 'Unlocked — Download Story'}
+                          </span>
                         </button>
                       ) : (
                         <button
@@ -2011,64 +2223,190 @@ export default function App() {
       {/* Section 7: Official Papers & Simple News */}
       <section id="papers-news" className="py-16 sm:py-20 bg-white border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-12 gap-10">
-          {/* Official School Papers */}
+          {/* Official School Papers & Books */}
           <div className="lg:col-span-7 space-y-6">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs font-semibold text-sky-900">
-                <FileText className="w-4 h-4" />
-                <span>{lang === 'ar' ? 'مستندات ونماذج رسمية' : 'Official Templates'}</span>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-sky-900">
+                  <FileText className="w-4 h-4" />
+                  <span>{lang === 'ar' ? 'كتب وأوراق ونماذج المعلم' : 'Books & Teacher Papers'}</span>
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900">{labels.papersTitle}</h2>
+                <p className="text-sm text-slate-600 leading-relaxed">{labels.papersLead}</p>
               </div>
-              <h2 className="text-2xl font-bold text-slate-900">{labels.papersTitle}</h2>
-              <p className="text-sm text-slate-600 leading-relaxed">{labels.papersLead}</p>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminInitialTab('papers');
+                    setAdminOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 whitespace-nowrap"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'إدارة الأوراق والكتب' : 'Manage Books & Papers'}</span>
+                </button>
+              )}
             </div>
 
             {papers.length === 0 ? (
               <p className="text-sm text-slate-500">{labels.emptyItems}</p>
             ) : (
               <div className="space-y-4">
-                {papers.map((paper) => (
-                  <div
-                    key={paper.id}
-                    className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-slate-500">
-                        {lang === 'ar' ? paper.categoryAr : paper.categoryEn} ·{' '}
-                        <span className="font-semibold text-emerald-700">{labels.freeLabel}</span>
-                      </p>
-                      <h3 className="text-base font-bold text-slate-900">
-                        {lang === 'ar' ? paper.titleAr : paper.titleEn}
-                      </h3>
-                      <p className="text-sm text-slate-600">
-                        {lang === 'ar' ? paper.descriptionAr : paper.descriptionEn}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadTextOrHtmlFile({
-                          fileName: paper.fileName || `${paper.id}.html`,
-                          title: lang === 'ar' ? paper.titleAr : paper.titleEn,
-                          subtitle: lang === 'ar' ? paper.categoryAr : paper.categoryEn,
-                          bodyText: paper.contentText,
-                          fileDataUrl: paper.fileDataUrl,
-                          externalUrl: paper.externalUrl,
-                          brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
-                          logoDataUrl: settings.logoDataUrl,
-                          analyticsSection: 'papers',
-                          analyticsItemId: paper.id,
-                          analyticsLang: lang,
-                        })
-                      }
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap shrink-0"
+                {papers.map((paper) => {
+                  const unlocked = isItemUnlocked(unlockedState, paper.id);
+                  const canDownload = !paper.isPaid || paper.priceEgp <= 0 || unlocked;
+                  const isBookSlot = Boolean(
+                    paper.coverUrl ||
+                      paper.id === 'paper_senior_teacher_book' ||
+                      paper.id === 'paper_quran_dotted_booklet' ||
+                      paper.categoryAr?.includes('كتب') ||
+                      paper.categoryAr?.includes('كتيب')
+                  );
+
+                  return (
+                    <div
+                      key={paper.id}
+                      className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                     >
-                      <Download className="w-4 h-4" />
-                      <span>{labels.downloadBtn}</span>
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-start gap-4 min-w-0 flex-1">
+                        {paper.coverUrl ? (
+                          <img
+                            src={paper.coverUrl}
+                            alt={lang === 'ar' ? paper.titleAr : paper.titleEn}
+                            referrerPolicy="no-referrer"
+                            className="w-20 sm:w-24 aspect-[3/4] rounded-xl object-cover border border-slate-200 bg-slate-100 shrink-0"
+                          />
+                        ) : isBookSlot ? (
+                          isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminInitialTab('papers');
+                                setAdminOpen(true);
+                              }}
+                              className="w-20 sm:w-24 aspect-[3/4] rounded-xl border border-dashed border-slate-300 bg-slate-50 hover:bg-sky-50 hover:border-sky-300 flex flex-col items-center justify-center p-2 text-center gap-1 shrink-0 transition-colors"
+                            >
+                              <BookOpen className="w-5 h-5 text-slate-400" />
+                              <span className="text-[11px] font-semibold text-slate-600 leading-tight">
+                                {lang === 'ar' ? 'أضيفي الغلاف' : 'Add Cover'}
+                              </span>
+                            </button>
+                          ) : (
+                            <div className="w-20 sm:w-24 aspect-[3/4] rounded-xl border border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center p-2 text-center gap-1 shrink-0">
+                              <BookOpen className="w-5 h-5 text-slate-400" />
+                              <span className="text-[11px] font-medium text-slate-500 leading-tight">
+                                {lang === 'ar' ? 'غلاف الكتاب' : 'Book Cover'}
+                              </span>
+                            </div>
+                          )
+                        ) : null}
+
+                        <div className="space-y-1 min-w-0">
+                          <p className="text-xs font-medium text-slate-500">
+                            {lang === 'ar' ? paper.categoryAr : paper.categoryEn} ·{' '}
+                            {paper.isPaid && paper.priceEgp > 0 ? (
+                              <span className="font-semibold text-amber-700 font-mono-num">
+                                {paper.priceEgp} {labels.egp}
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-emerald-700">{labels.freeLabel}</span>
+                            )}
+                          </p>
+                          <h3 className="text-base font-bold text-slate-900">
+                            {lang === 'ar' ? paper.titleAr : paper.titleEn}
+                          </h3>
+                          <p className="text-sm text-slate-600 leading-relaxed">
+                            {lang === 'ar' ? paper.descriptionAr : paper.descriptionEn}
+                          </p>
+                        </div>
+                      </div>
+
+                      {canDownload ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadTextOrHtmlFile({
+                              fileName: paper.fileName || `${paper.id}.html`,
+                              title: lang === 'ar' ? paper.titleAr : paper.titleEn,
+                              subtitle: lang === 'ar' ? paper.categoryAr : paper.categoryEn,
+                              bodyText: paper.contentText,
+                              fileDataUrl: paper.fileDataUrl,
+                              externalUrl: paper.externalUrl,
+                              brandHeader: lang === 'ar' ? settings.academyNameAr : settings.academyNameEn,
+                              logoDataUrl: settings.logoDataUrl,
+                              analyticsSection: 'papers',
+                              analyticsItemId: paper.id,
+                              analyticsLang: lang,
+                            })
+                          }
+                          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                            paper.isPaid && paper.priceEgp > 0
+                              ? 'bg-emerald-700 hover:bg-emerald-600'
+                              : 'bg-sky-900 hover:bg-sky-800'
+                          }`}
+                        >
+                          {paper.isPaid && paper.priceEgp > 0 ? (
+                            <CheckCircle2 className="w-4 h-4" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                          <span>
+                            {paper.isPaid && paper.priceEgp > 0
+                              ? lang === 'ar'
+                                ? 'مفعّل — تحميل الآن'
+                                : 'Unlocked — Download'
+                              : labels.downloadBtn}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaymentIntent({
+                              itemType: 'paper',
+                              itemTitle: lang === 'ar' ? paper.titleAr : paper.titleEn,
+                              amountEgp: paper.priceEgp,
+                              targetType: 'paper',
+                              targetId: paper.id,
+                            })
+                          }
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap shrink-0 transition-colors"
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>
+                            {labels.buyInstapayBtn} · {paper.priceEgp} {labels.egp}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-0.5 min-w-0">
+                <p className="text-xs font-bold text-slate-900">
+                  {lang === 'ar'
+                    ? `هل تبحثين عن مجموعات التأسيس المرقّمة (${packs.length} مجموعات)؟`
+                    : `Looking for numbered foundation worksheet packs (${packs.length} packs)?`}
+                </p>
+                <p className="text-xs text-slate-600">
+                  {lang === 'ar'
+                    ? 'تأسيس الحروف العربية والإنجليزية والأرقام وتحسين الخط موجودة في قسم مكتبة الحزم المرقّمة بالأعلى.'
+                    : 'Arabic/English tracing, numbers, and handwriting packs are in the Worksheet Packs library above.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => scrollToTargetSection('worksheet-library')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-sky-900 bg-white border border-sky-200 rounded-xl hover:bg-sky-50 whitespace-nowrap shrink-0"
+              >
+                <span>{lang === 'ar' ? 'انتقلي إلى حزم التأسيس' : 'Go to Foundation Packs'}</span>
+                {lang === 'ar' ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+              </button>
+            </div>
           </div>
 
           {/* Simple News Feed */}
@@ -2105,6 +2443,9 @@ export default function App() {
         </div>
       </section>
 
+      {/* About Us, Affiliate Transparency & Contact Us */}
+      <AboutAndContactSection lang={lang} settings={settings} />
+
       {/* Editorial Platform Index */}
       <section className="py-10 bg-slate-100 border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row md:items-center justify-between gap-5">
@@ -2130,6 +2471,7 @@ export default function App() {
               { id: 'grades', ar: 'الصفوف والتحضير', en: 'Grades & Preps' },
               { id: 'worksheet-library', ar: 'حزم أوراق العمل', en: 'Worksheet Packs' },
               { id: 'quiz-builder', ar: 'بنك الأسئلة والكويزات', en: 'Quiz Bank' },
+              { id: 'courses', ar: 'الكورسات', en: 'Courses' },
               { id: 'english-games', ar: 'ألعاب الإنجليزي', en: 'English Games' },
               { id: 'decision-lab', ar: 'صنّاع القرار والمبدعين', en: 'Decision Lab' },
               { id: 'iq-tests', ar: 'اختبارات الذكاء', en: 'IQ & Psych Lab' },
@@ -2137,6 +2479,8 @@ export default function App() {
               { id: 'stories', ar: 'القصص الإنجليزية', en: 'Stories' },
               { id: 'certificates', ar: 'استوديو الشهادات', en: 'Certificates' },
               { id: 'teacher-studio', ar: 'استوديو المعلم', en: 'Teacher Studio' },
+              { id: 'about', ar: 'عن الأكاديمية', en: 'About Us' },
+              { id: 'contact', ar: 'تواصل معنا', en: 'Contact Us' },
             ].map((sec) => (
               <button
                 key={sec.id}
@@ -2160,27 +2504,67 @@ export default function App() {
       </section>
 
       {/* Footer */}
-      <footer className="mt-auto bg-slate-950 text-slate-300 py-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
-          <p>
-            © 2026 {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
-          </p>
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}
-              className="hover:text-white transition-colors"
-            >
-              {labels.switchLang}
-            </button>
-            <button
-              type="button"
-              onClick={() => setAdminOpen(true)}
-              className="hover:text-white transition-colors"
-            >
-              {labels.adminControlBtn}
-            </button>
+      <footer className="mt-auto bg-slate-950 text-slate-300 py-10 border-t border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+            <div className="space-y-1">
+              <p className="font-semibold text-white">
+                © 2026 {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
+              </p>
+              <p className="text-slate-400">
+                {lang === 'ar'
+                  ? 'بوابة تعليمية للغة الإنجليزية · تواصل الشراكات: lailafarag210@gmail.com'
+                  : 'Bilingual ESL Education Portal · Inquiries & Partnerships: lailafarag210@gmail.com'}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <a
+                href="#about"
+                className="hover:text-white transition-colors whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'عن الأكاديمية' : 'About Us'}
+              </a>
+              <a
+                href="#contact"
+                className="hover:text-white transition-colors whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'تواصل معنا' : 'Contact Us'}
+              </a>
+              <a
+                href="#courses"
+                className="hover:text-white transition-colors whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'الكورسات' : 'Courses'}
+              </a>
+              <a
+                href="#affiliate-disclosure"
+                className="hover:text-white transition-colors whitespace-nowrap"
+              >
+                {lang === 'ar' ? 'إفصاح الشراكات' : 'Affiliate Disclosure'}
+              </a>
+              <button
+                type="button"
+                onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}
+                className="hover:text-white transition-colors whitespace-nowrap"
+              >
+                {labels.switchLang}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminOpen(true)}
+                className="hover:text-white transition-colors whitespace-nowrap"
+              >
+                {labels.adminControlBtn}
+              </button>
+            </div>
           </div>
+
+          <p className="text-[11px] text-slate-400 border-t border-slate-800/80 pt-4 leading-relaxed">
+            {lang === 'ar'
+              ? 'إفصاح الشفافية: بعض الروابط الخارجية في قسم الكورسات التعليمية قد تكون روابط تسويق بالعمولة (Affiliate Links عبر شبكات مثل Impact وغيرها)، مما يساعد على دعم استمرارية الأدوات والموارد المجانية للمعلمين والطلاب دون أي تكلفة إضافية عليك.'
+              : 'Affiliate Disclosure: Select external partner links in our Courses section may be affiliate links (including Impact partner programs). If you enroll via those links, LinguaCraft Academy may earn a commission at no additional cost to you.'}
+          </p>
         </div>
       </footer>
 
@@ -2289,7 +2673,7 @@ export default function App() {
               >
                 {labels.closeBtn}
               </button>
-              {isItemUnlocked(unlockedState, excerptStory.id) ? (
+              {!excerptStory.isPaid || excerptStory.priceEgp <= 0 || isItemUnlocked(unlockedState, excerptStory.id) ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -2311,8 +2695,20 @@ export default function App() {
                   }}
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 rounded-lg hover:bg-emerald-600"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'مفعّلة — تحميل القصة' : 'Unlocked — Download Story'}</span>
+                  {!excerptStory.isPaid || excerptStory.priceEgp <= 0 ? (
+                    <Download className="w-3.5 h-3.5" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {!excerptStory.isPaid || excerptStory.priceEgp <= 0
+                      ? lang === 'ar'
+                        ? 'تحميل القصة مجاناً'
+                        : 'Download Free Story'
+                      : lang === 'ar'
+                      ? 'مفعّلة — تحميل القصة'
+                      : 'Unlocked — Download Story'}
+                  </span>
                 </button>
               ) : (
                 <button
@@ -2402,6 +2798,8 @@ export default function App() {
         onSeedMissingWorksheetsAndActivities={handleSeedMissingWorksheetsAndActivities}
         onSeedStarterPacks={handleSeedStarterPacks}
         onSeedCoursesAndBank={handleSeedCoursesAndBank}
+        onSeedMissingPapers={handleSeedMissingPapers}
+        onStarterItemDeleted={markStarterItemDeleted}
       />
     </div>
   );

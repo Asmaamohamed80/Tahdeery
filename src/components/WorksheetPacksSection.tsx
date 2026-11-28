@@ -21,6 +21,7 @@ interface WorksheetPacksSectionProps {
   isAdmin: boolean;
   unlockedState: UnlockedState;
   onOpenAdminPacks: () => void;
+  onJumpToPapers?: () => void;
   onRequestPayment: (intent: PaymentIntent) => void;
 }
 
@@ -32,6 +33,7 @@ export function WorksheetPacksSection({
   isAdmin,
   unlockedState,
   onOpenAdminPacks,
+  onJumpToPapers,
   onRequestPayment,
 }: WorksheetPacksSectionProps) {
   const labels = t(lang);
@@ -95,16 +97,31 @@ export function WorksheetPacksSection({
             <p className="text-slate-600 text-base leading-relaxed">{labels.packsLead}</p>
           </div>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={onOpenAdminPacks}
-              className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap shrink-0"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-              <span>{lang === 'ar' ? 'إضافة رقم ومجموعة أوراق' : 'Manage Worksheet Packs'}</span>
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {onJumpToPapers && (
+              <button
+                type="button"
+                onClick={onJumpToPapers}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 whitespace-nowrap"
+              >
+                <span>
+                  {lang === 'ar'
+                    ? 'كتب المعلم وكتيب القرآن والسجلات ←'
+                    : 'Books, Quran Booklet & Sheets →'}
+                </span>
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={onOpenAdminPacks}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-900 rounded-xl hover:bg-sky-800 whitespace-nowrap"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span>{lang === 'ar' ? 'إضافة رقم ومجموعة أوراق' : 'Manage Worksheet Packs'}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Level/Age & Track Filter Bar */}

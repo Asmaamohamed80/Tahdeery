@@ -62,6 +62,12 @@ export interface AcademySettings {
   whiteLabelPriceEgp: number;
   aiCertificatePriceEgp: number;
   quizTermPriceEgp?: number;
+  termPromoEnabled?: boolean;
+  termPromoTitleAr?: string;
+  termPromoTitleEn?: string;
+  termPromoSubtitleAr?: string;
+  termPromoSubtitleEn?: string;
+  termPromoDurationDays?: number;
   seeded: boolean;
   updatedAt?: unknown;
 }
@@ -136,6 +142,8 @@ export interface TeacherSubscription {
   teacherEmail?: string;
   termLabel: string;
   active: boolean;
+  durationDays?: number;
+  expiresAtMs?: number;
   activatedByUid: string;
   activatedAt?: unknown;
 }
@@ -187,6 +195,7 @@ export interface OfficialPaper {
   descriptionEn: string;
   descriptionAr: string;
   contentText: string;
+  coverUrl?: string;
   fileName?: string;
   fileDataUrl?: string;
   externalUrl?: string;
@@ -252,13 +261,15 @@ export type VisitorRole = 'all' | 'teacher' | 'student' | 'parent';
 export interface ActivationCode {
   id: string;
   code: string;
-  targetType: 'resource' | 'pack' | 'story' | 'all_paid';
+  targetType: 'resource' | 'pack' | 'story' | 'paper' | 'all_paid';
   targetId: string;
   targetTitle: string;
   note?: string;
   maxUses: number;
   usedCount: number;
   active: boolean;
+  durationDays?: number;
+  expiresAtMs?: number;
   createdByUid: string;
   createdAt?: unknown;
 }
