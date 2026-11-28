@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   instapayHandle: 'linguacraft@instapay',
   instapayUrl: 'https://ipn.eg/S/linguacraft/instapay',
   whatsappNumber: '201000000000',
+  contactEmail: 'lailafarag210@gmail.com',
   whiteLabelPriceEgp: 75,
   aiCertificatePriceEgp: 50,
   quizTermPriceEgp: 120,

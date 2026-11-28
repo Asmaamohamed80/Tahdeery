@@ -59,6 +59,7 @@ export interface AcademySettings {
   instapayHandle: string;
   instapayUrl?: string;
   whatsappNumber: string;
+  contactEmail?: string;
   whiteLabelPriceEgp: number;
   aiCertificatePriceEgp: number;
   quizTermPriceEgp?: number;

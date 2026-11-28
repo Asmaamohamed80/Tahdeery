@@ -40,7 +40,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
-          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
+          'whatsappNumber', 'contactEmail', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
           'termPromoEnabled', 'termPromoTitleAr', 'termPromoTitleEn', 'termPromoSubtitleAr',
           'termPromoSubtitleEn', 'termPromoDurationDays',
           'seeded', 'updatedAt'
@@ -51,6 +51,7 @@ service cloud.firestore {
         && data.instapayHandle is string && data.instapayHandle.size() >= 2 && data.instapayHandle.size() <= 120
         && (!data.keys().hasAny(['instapayUrl']) || (data.instapayUrl is string && data.instapayUrl.size() <= 300))
         && data.whatsappNumber is string && data.whatsappNumber.size() >= 6 && data.whatsappNumber.size() <= 25
+        && (!data.keys().hasAny(['contactEmail']) || (data.contactEmail is string && data.contactEmail.size() <= 160))
         && data.whiteLabelPriceEgp is number && data.whiteLabelPriceEgp >= 0 && data.whiteLabelPriceEgp <= 100000
         && data.aiCertificatePriceEgp is number && data.aiCertificatePriceEgp >= 0 && data.aiCertificatePriceEgp <= 100000
         && (!data.keys().hasAny(['quizTermPriceEgp']) || (data.quizTermPriceEgp is number && data.quizTermPriceEgp >= 0 && data.quizTermPriceEgp <= 100000))
@@ -422,7 +423,7 @@ service cloud.firestore {
       allow update: if isValidId(settingId) && isAdmin() && isValidSettings(incoming()) && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'academyNameEn', 'academyNameAr', 'logoDataUrl', 'instapayHandle', 'instapayUrl',
-          'whatsappNumber', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
+          'whatsappNumber', 'contactEmail', 'whiteLabelPriceEgp', 'aiCertificatePriceEgp', 'quizTermPriceEgp',
           'termPromoEnabled', 'termPromoTitleAr', 'termPromoTitleEn', 'termPromoSubtitleAr',
           'termPromoSubtitleEn', 'termPromoDurationDays',
           'seeded', 'updatedAt'

@@ -223,6 +223,7 @@ export function AdminDashboardModal({
   const [instapayHandle, setInstapayHandle] = useState(settings.instapayHandle);
   const [instapayUrl, setInstapayUrl] = useState(settings.instapayUrl || '');
   const [whatsappNumber, setWhatsappNumber] = useState(settings.whatsappNumber);
+  const [contactEmail, setContactEmail] = useState(settings.contactEmail || 'lailafarag210@gmail.com');
   const [whiteLabelPrice, setWhiteLabelPrice] = useState(settings.whiteLabelPriceEgp);
   const [certPrice, setCertPrice] = useState(settings.aiCertificatePriceEgp);
   const [quizTermPrice, setQuizTermPrice] = useState(settings.quizTermPriceEgp ?? 120);
@@ -335,6 +336,7 @@ export function AdminDashboardModal({
     setInstapayHandle(settings.instapayHandle);
     setInstapayUrl(settings.instapayUrl || '');
     setWhatsappNumber(settings.whatsappNumber);
+    setContactEmail(settings.contactEmail || 'lailafarag210@gmail.com');
     setWhiteLabelPrice(settings.whiteLabelPriceEgp);
     setCertPrice(settings.aiCertificatePriceEgp);
     setQuizTermPrice(settings.quizTermPriceEgp ?? 120);
@@ -1118,6 +1120,7 @@ export function AdminDashboardModal({
         instapayHandle: instapayHandle.slice(0, 120),
         instapayUrl: instapayUrl.slice(0, 300),
         whatsappNumber: whatsappNumber.slice(0, 25),
+        contactEmail: (contactEmail.trim() || 'lailafarag210@gmail.com').slice(0, 160),
         whiteLabelPriceEgp: Number(whiteLabelPrice) || 0,
         aiCertificatePriceEgp: Number(certPrice) || 0,
         quizTermPriceEgp: Number(quizTermPrice) || 0,
@@ -3525,17 +3528,34 @@ export function AdminDashboardModal({
                     className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-lg"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {lang === 'ar' ? 'رقم الواتساب بالصيغة الدولية (مثال: 2010...)' : 'WhatsApp Number (e.g. 2010...)'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={whatsappNumber}
-                    onChange={(e) => setWhatsappNumber(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-lg"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {lang === 'ar' ? 'رقم الواتساب بالصيغة الدولية (مثال: 2010...)' : 'WhatsApp Number (e.g. 2010...)'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      dir="ltr"
+                      value={whatsappNumber}
+                      onChange={(e) => setWhatsappNumber(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {lang === 'ar' ? 'البريد الإلكتروني الرسمي للتواصل والشراكات' : 'Official Contact & Partnerships Email'}
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      dir="ltr"
+                      value={contactEmail}
+                      onChange={(e) => setContactEmail(e.target.value)}
+                      placeholder="name@example.com"
+                      className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>

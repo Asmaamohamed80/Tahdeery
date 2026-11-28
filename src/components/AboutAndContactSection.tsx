@@ -18,7 +18,7 @@ interface AboutAndContactSectionProps {
   settings: AcademySettings;
 }
 
-const PUBLISHER_EMAIL = 'lailafarag210@gmail.com';
+const DEFAULT_CONTACT_EMAIL = 'lailafarag210@gmail.com';
 const PUBLISHER_DOMAIN = 'tahdeery.vercel.app';
 
 type ContactTopic = 'general' | 'affiliate' | 'subscription' | 'curriculum';
@@ -26,6 +26,7 @@ type ContactTopic = 'general' | 'affiliate' | 'subscription' | 'curriculum';
 export function AboutAndContactSection({ lang, settings }: AboutAndContactSectionProps) {
   const labels = t(lang);
   const academyName = lang === 'ar' ? settings.academyNameAr : settings.academyNameEn;
+  const publisherEmail = (settings.contactEmail || DEFAULT_CONTACT_EMAIL).trim() || DEFAULT_CONTACT_EMAIL;
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -65,7 +66,7 @@ export function AboutAndContactSection({ lang, settings }: AboutAndContactSectio
         }\n\n` +
         `${message.trim()}`
     );
-    return `mailto:${PUBLISHER_EMAIL}?subject=${subject}&body=${body}`;
+    return `mailto:${publisherEmail}?subject=${subject}&body=${body}`;
   };
 
   const buildWhatsappHref = () => {
@@ -81,7 +82,7 @@ export function AboutAndContactSection({ lang, settings }: AboutAndContactSectio
 
   const handleCopyEmail = async () => {
     try {
-      await navigator.clipboard.writeText(PUBLISHER_EMAIL);
+      await navigator.clipboard.writeText(publisherEmail);
       setCopiedEmail(true);
       setTimeout(() => setCopiedEmail(false), 2500);
     } catch {
@@ -236,10 +237,10 @@ export function AboutAndContactSection({ lang, settings }: AboutAndContactSectio
                   </dt>
                   <dd className="font-mono-num font-semibold text-slate-900 text-end">
                     <a
-                      href={`mailto:${PUBLISHER_EMAIL}`}
+                      href={`mailto:${publisherEmail}`}
                       className="text-sky-900 hover:underline underline-offset-4"
                     >
-                      {PUBLISHER_EMAIL}
+                      {publisherEmail}
                     </a>
                   </dd>
                 </div>
@@ -301,10 +302,10 @@ export function AboutAndContactSection({ lang, settings }: AboutAndContactSectio
                     </p>
                     <div className="pt-1 flex flex-wrap items-center gap-2">
                       <a
-                        href={`mailto:${PUBLISHER_EMAIL}`}
+                        href={`mailto:${publisherEmail}`}
                         className="font-mono-num text-sm font-semibold text-sky-900 hover:underline underline-offset-4 break-all"
                       >
-                        {PUBLISHER_EMAIL}
+                        {publisherEmail}
                       </a>
                       <button
                         type="button"
@@ -472,8 +473,8 @@ export function AboutAndContactSection({ lang, settings }: AboutAndContactSectio
                   <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                   <span>
                     {lang === 'ar'
-                      ? `تم تجهيز رسالتك للإرسال إلى ${PUBLISHER_EMAIL}. يمكنك أيضاً المتابعة مباشرة عبر زر الواتساب.`
-                      : `Your message is ready to send to ${PUBLISHER_EMAIL}. You can also reach us directly via WhatsApp below.`}
+                      ? `تم تجهيز رسالتك للإرسال إلى ${publisherEmail}. يمكنك أيضاً المتابعة مباشرة عبر زر الواتساب.`
+                      : `Your message is ready to send to ${publisherEmail}. You can also reach us directly via WhatsApp below.`}
                   </span>
                 </div>
               )}

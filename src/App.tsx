@@ -2512,9 +2512,13 @@ export default function App() {
                 © 2026 {lang === 'ar' ? settings.academyNameAr : settings.academyNameEn}
               </p>
               <p className="text-slate-400">
-                {lang === 'ar'
-                  ? 'بوابة تعليمية للغة الإنجليزية · تواصل الشراكات: lailafarag210@gmail.com'
-                  : 'Bilingual ESL Education Portal · Inquiries & Partnerships: lailafarag210@gmail.com'}
+                {lang === 'ar' ? 'بوابة تعليمية للغة الإنجليزية · تواصل الشراكات: ' : 'Bilingual ESL Education Portal · Inquiries & Partnerships: '}
+                <a
+                  href={`mailto:${settings.contactEmail || 'lailafarag210@gmail.com'}`}
+                  className="text-slate-200 hover:text-white underline underline-offset-4"
+                >
+                  {settings.contactEmail || 'lailafarag210@gmail.com'}
+                </a>
               </p>
             </div>
 
